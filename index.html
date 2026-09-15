@@ -104,7 +104,7 @@
   .stat-card.accent-danger::before{background:var(--danger);}
   .stat-card.accent-navy::before{background:var(--navy);}
 
-  .panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px; margin-bottom:20px;}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px; margin-bottom:20px; overflow-x:auto;}
   .panel-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; gap:10px; flex-wrap:wrap;}
   .panel-head h3{margin:0; font-size:15.5px; font-weight:600;}
 
@@ -210,9 +210,9 @@
   }
 </style>
 <!-- Firebase (Firestore + Authentication) -->
-<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.13.2/firebase-app-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.13.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -227,7 +227,7 @@ const STREAMS = ["English","Arts"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.1.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -243,6 +243,15 @@ const firebaseConfig = {
   messagingSenderId: "313920873480",
   appId: "1:313920873480:web:997c2933675e5e029b1dbd"
 };
+if(typeof firebase === "undefined"){
+  document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;padding:24px;text-align:center;font-family:sans-serif;color:#152436;">
+    <div>
+      <h2 style="font-family:'Fraunces',serif;">Couldn't connect</h2>
+      <p style="max-width:340px;">This app needs an internet connection to load. Please open this file in your phone or computer's regular browser (Chrome, not an in-app preview) and make sure you're online, then try again.</p>
+    </div>
+  </div>`;
+  throw new Error("Firebase SDK failed to load — no network or blocked script.");
+}
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
@@ -297,6 +306,7 @@ let state = {
   search: "",
   filterClass: "",
   filterStream: "",
+  filterYear: "",
   reportTab: "classwise",
   sidebarOpen: false,
 };
@@ -383,10 +393,20 @@ function escapeHtml(str){
 }
 function validMobile(m){ return /^[0-9]{10}$/.test(String(m||"").trim()); }
 
+function admissionYear(s){
+  return s.admissionDate ? String(s.admissionDate).slice(0,4) : "";
+}
+
+function availableYears(){
+  const years = new Set(state.students.map(admissionYear).filter(Boolean));
+  return Array.from(years).sort((a,b)=> b.localeCompare(a));
+}
+
 function filteredStudents(){
   let list = state.students.slice();
   if(state.filterClass) list = list.filter(s=>s.class===state.filterClass);
   if(state.filterStream) list = list.filter(s=>s.stream===state.filterStream);
+  if(state.filterYear) list = list.filter(s=>admissionYear(s)===state.filterYear);
   if(state.search.trim()){
     const q = state.search.trim().toLowerCase();
     list = list.filter(s =>
@@ -583,6 +603,10 @@ function renderFilterBar(){
         <option value="">All Streams</option>
         ${STREAMS.map(s=>`<option value="${s}" ${state.filterStream===s?"selected":""}>${s}</option>`).join("")}
       </select>
+      <select class="input" id="filterYear">
+        <option value="">All Batches</option>
+        ${availableYears().map(y=>`<option value="${y}" ${state.filterYear===y?"selected":""}>Admitted ${y}</option>`).join("")}
+      </select>
     </div>
   </div>`;
 }
@@ -601,7 +625,7 @@ function renderStudents(){
     <div class="panel-head"><h3>All Students (${list.length})</h3></div>
     <table>
       <thead><tr>
-        <th>Admission ID</th><th>Name</th><th>Class</th><th>Stream</th><th>Mobile</th>
+        <th>Admission ID</th><th>Name</th><th>Batch</th><th>Class</th><th>Stream</th><th>Mobile</th>
         <th>Fee</th><th>Paid</th><th>Due</th><th>Status</th><th class="no-print">Actions</th>
       </tr></thead>
       <tbody>
@@ -610,6 +634,7 @@ function renderStudents(){
           return `<tr>
             <td class="cell-muted">${s.id}</td>
             <td class="cell-strong" style="cursor:pointer;" data-view="${s.id}">${escapeHtml(s.name)}</td>
+            <td><span class="tag">${admissionYear(s)}</span></td>
             <td>Class ${s.class}</td>
             <td><span class="tag">${s.stream}</span></td>
             <td>${escapeHtml(s.mobile)}</td>
@@ -625,7 +650,7 @@ function renderStudents(){
               </div>
             </td>
           </tr>`;
-        }).join("") : `<tr class="empty-row"><td colspan="10">No students match. Try adjusting search or filters, or add a new admission.</td></tr>`}
+        }).join("") : `<tr class="empty-row"><td colspan="11">No students match. Try adjusting search or filters, or add a new admission.</td></tr>`}
       </tbody>
     </table>
   </div>
@@ -701,6 +726,7 @@ function renderFees(){
    ========================================================= */
 function renderReports(){
   const tabs = [
+    ["yearwise","Batch / Year-wise"],
     ["classwise","Class-wise Students"],
     ["streamwise","Stream-wise Students"],
     ["collection","Class-wise Collection"],
@@ -711,7 +737,25 @@ function renderReports(){
   let body = "";
   const list = state.students;
 
-  if(state.reportTab==="classwise"){
+  if(state.reportTab==="yearwise"){
+    const years = availableYears();
+    body = years.length ? years.map(y=>{
+      const rows = list.filter(s=>admissionYear(s)===y);
+      const fee = rows.reduce((a,s)=>a+Number(s.totalFee||0),0);
+      const collected = rows.reduce((a,s)=>a+computeDerived(s).paid,0);
+      return `<div class="panel">
+        <div class="panel-head"><h3>Admission Batch ${y} (${rows.length} student${rows.length===1?"":"s"})</h3></div>
+        <div class="kv-grid" style="margin-top:0;">
+          <div class="kv"><div class="k">Total Fee</div><div class="v">${fmtMoney(fee)}</div></div>
+          <div class="kv"><div class="k">Collected</div><div class="v">${fmtMoney(collected)}</div></div>
+          <div class="kv"><div class="k">Due</div><div class="v">${fmtMoney(fee-collected)}</div></div>
+        </div>
+        <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class</th><th>Stream</th><th>Admission Date</th></tr></thead>
+        <tbody>${rows.map(s=>`<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class}</td><td><span class="tag">${s.stream}</span></td><td>${fmtDate(s.admissionDate)}</td></tr>`).join("")}</tbody></table>
+      </div>`;
+    }).join("") : `<div class="panel"><div class="empty-row" style="padding:20px;">No admissions recorded yet.</div></div>`;
+  }
+  else if(state.reportTab==="classwise"){
     body = CLASSES.map(c=>{
       const rows = list.filter(s=>s.class===c);
       return `<div class="panel">
@@ -793,6 +837,8 @@ function attachContentHandlers(){
   if(fc) fc.addEventListener("change", e=>{ state.filterClass = e.target.value; render(); });
   const fs = document.getElementById("filterStream");
   if(fs) fs.addEventListener("change", e=>{ state.filterStream = e.target.value; render(); });
+  const fy = document.getElementById("filterYear");
+  if(fy) fy.addEventListener("change", e=>{ state.filterYear = e.target.value; render(); });
 
   document.querySelectorAll("[data-view]").forEach(el=>{
     el.addEventListener("click", ()=> openProfile(el.dataset.view));
@@ -1176,3 +1222,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
+<!-- VERSION 2.1.0 — added Batch/Year-wise report & filter -->
