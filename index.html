@@ -227,7 +227,7 @@ const STREAMS = ["English","Arts"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -412,7 +412,8 @@ function filteredStudents(){
     list = list.filter(s =>
       s.name.toLowerCase().includes(q) ||
       String(s.mobile).includes(q) ||
-      s.id.toLowerCase().includes(q)
+      s.id.toLowerCase().includes(q) ||
+      String(s.rollNumber||"").toLowerCase().includes(q)
     );
   }
   return list.sort((a,b)=> new Date(b.admissionDate) - new Date(a.admissionDate));
@@ -593,7 +594,7 @@ function renderFilterBar(){
     <div class="filters-row">
       <div class="search-wrap">
         ${ICONS.search}
-        <input class="input" id="searchInput" placeholder="Search by name, mobile, or admission ID" value="${escapeHtml(state.search)}"/>
+        <input class="input" id="searchInput" placeholder="Search by name, mobile, roll no., or admission ID" value="${escapeHtml(state.search)}"/>
       </div>
       <select class="input" id="filterClass">
         <option value="">All Classes</option>
@@ -625,13 +626,14 @@ function renderStudents(){
     <div class="panel-head"><h3>All Students (${list.length})</h3></div>
     <table>
       <thead><tr>
-        <th>Admission ID</th><th>Name</th><th>Batch</th><th>Class</th><th>Stream</th><th>Mobile</th>
+        <th>Roll No.</th><th>Admission ID</th><th>Name</th><th>Batch</th><th>Class</th><th>Stream</th><th>Mobile</th>
         <th>Fee</th><th>Paid</th><th>Due</th><th>Status</th><th class="no-print">Actions</th>
       </tr></thead>
       <tbody>
         ${list.length ? list.map(s=>{
           const d = computeDerived(s);
           return `<tr>
+            <td class="cell-muted">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</td>
             <td class="cell-muted">${s.id}</td>
             <td class="cell-strong" style="cursor:pointer;" data-view="${s.id}">${escapeHtml(s.name)}</td>
             <td><span class="tag">${admissionYear(s)}</span></td>
@@ -650,7 +652,7 @@ function renderStudents(){
               </div>
             </td>
           </tr>`;
-        }).join("") : `<tr class="empty-row"><td colspan="11">No students match. Try adjusting search or filters, or add a new admission.</td></tr>`}
+        }).join("") : `<tr class="empty-row"><td colspan="12">No students match. Try adjusting search or filters, or add a new admission.</td></tr>`}
       </tbody>
     </table>
   </div>
@@ -915,6 +917,10 @@ function openStudentForm(studentId){
           <div class="err" data-err="name"></div>
         </div>
         <div class="field">
+          <label>Roll Number</label>
+          <input class="input" name="rollNumber" value="${editing?escapeHtml(s.rollNumber||""):""}" placeholder="e.g. 21"/>
+        </div>
+        <div class="field">
           <label>Father's / Mother's Name *</label>
           <input class="input" name="guardianName" value="${editing?escapeHtml(s.guardianName):""}" required/>
           <div class="err" data-err="guardianName"></div>
@@ -993,6 +999,7 @@ function openStudentForm(studentId){
     if(editing){
       updateStudentDoc(admissionId, {
         name: data.name.trim(),
+        rollNumber: (data.rollNumber||"").trim(),
         guardianName: data.guardianName.trim(),
         mobile: data.mobile.trim(),
         admissionDate: data.admissionDate,
@@ -1010,6 +1017,7 @@ function openStudentForm(studentId){
       }
       createStudentDoc(admissionId, {
         name: data.name.trim(),
+        rollNumber: (data.rollNumber||"").trim(),
         guardianName: data.guardianName.trim(),
         mobile: data.mobile.trim(),
         class: data.class,
@@ -1094,12 +1102,13 @@ function openProfile(studentId){
     <div class="profile-top">
       <div>
         <div class="profile-name">${escapeHtml(s.name)}</div>
-        <div class="profile-id">${s.id} · Class ${s.class} · ${s.stream}</div>
+        <div class="profile-id">${s.id}${s.rollNumber? " · Roll No. "+escapeHtml(s.rollNumber) : ""} · Class ${s.class} · ${s.stream}</div>
       </div>
       <div>${statusBadge(d.status)}</div>
     </div>
 
     <div class="kv-grid">
+      <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
       <div class="kv"><div class="k">Father's / Mother's Name</div><div class="v">${escapeHtml(s.guardianName)}</div></div>
       <div class="kv"><div class="k">Mobile Number</div><div class="v">${escapeHtml(s.mobile)}</div></div>
       <div class="kv"><div class="k">Admission Date</div><div class="v">${fmtDate(s.admissionDate)}</div></div>
@@ -1222,4 +1231,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 2.1.0 — added Batch/Year-wise report & filter -->
+<!-- VERSION 2.2.0 — added Roll Number field, column & search -->
