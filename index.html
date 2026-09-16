@@ -227,7 +227,7 @@ const STREAMS = ["English","Arts"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "2.3.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -926,9 +926,14 @@ function openStudentForm(studentId){
           <div class="err" data-err="guardianName"></div>
         </div>
         <div class="field">
-          <label>Mobile Number *</label>
+          <label>Student's Mobile Number *</label>
           <input class="input" name="mobile" maxlength="10" value="${editing?escapeHtml(s.mobile):""}" placeholder="10-digit number" required/>
           <div class="err" data-err="mobile"></div>
+        </div>
+        <div class="field">
+          <label>Guardian's Mobile Number *</label>
+          <input class="input" name="guardianMobile" maxlength="10" value="${editing?escapeHtml(s.guardianMobile||""):""}" placeholder="10-digit number" required/>
+          <div class="err" data-err="guardianMobile"></div>
         </div>
         <div class="field">
           <label>Admission Date *</label>
@@ -989,6 +994,7 @@ function openStudentForm(studentId){
     if(!data.name || !data.name.trim()) setErr("name","Student name is required.");
     if(!data.guardianName || !data.guardianName.trim()) setErr("guardianName","Guardian's name is required.");
     if(!validMobile(data.mobile)) setErr("mobile","Enter a valid 10-digit mobile number.");
+    if(!validMobile(data.guardianMobile)) setErr("guardianMobile","Enter a valid 10-digit mobile number.");
     if(!data.admissionDate) setErr("admissionDate","Admission date is required.");
     if(!data.class) setErr("class","Please select a class.");
     if(!data.stream) setErr("stream","Please select a stream.");
@@ -1002,6 +1008,7 @@ function openStudentForm(studentId){
         rollNumber: (data.rollNumber||"").trim(),
         guardianName: data.guardianName.trim(),
         mobile: data.mobile.trim(),
+        guardianMobile: data.guardianMobile.trim(),
         admissionDate: data.admissionDate,
         class: data.class,
         stream: data.stream,
@@ -1020,6 +1027,7 @@ function openStudentForm(studentId){
         rollNumber: (data.rollNumber||"").trim(),
         guardianName: data.guardianName.trim(),
         mobile: data.mobile.trim(),
+        guardianMobile: data.guardianMobile.trim(),
         class: data.class,
         stream: data.stream,
         admissionDate: data.admissionDate,
@@ -1111,6 +1119,7 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
       <div class="kv"><div class="k">Father's / Mother's Name</div><div class="v">${escapeHtml(s.guardianName)}</div></div>
       <div class="kv"><div class="k">Mobile Number</div><div class="v">${escapeHtml(s.mobile)}</div></div>
+      <div class="kv"><div class="k">Guardian's Mobile Number</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
       <div class="kv"><div class="k">Admission Date</div><div class="v">${fmtDate(s.admissionDate)}</div></div>
       <div class="kv"><div class="k">Total Course Fee</div><div class="v">${fmtMoney(s.totalFee)}</div></div>
       <div class="kv"><div class="k">Amount Paid</div><div class="v">${fmtMoney(d.paid)}</div></div>
@@ -1231,4 +1240,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 2.2.0 — added Roll Number field, column & search -->
+<!-- VERSION 2.3.0 — added Guardian's Mobile Number field -->
