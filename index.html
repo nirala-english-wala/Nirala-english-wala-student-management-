@@ -223,11 +223,11 @@
    DATA LAYER
    ========================================================= */
 const CLASSES = ["11","12"];
-const STREAMS = ["English","Arts"];
+const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "2.3.0";
+const APP_VERSION = "3.0.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -393,6 +393,25 @@ function escapeHtml(str){
 }
 function validMobile(m){ return /^[0-9]{10}$/.test(String(m||"").trim()); }
 
+/* WhatsApp fee reminders — sent from whichever phone/number opens the link.
+   Institute's designated numbers for this task: +91 9279701355, +91 8709322284 */
+function buildReminderLink(s){
+  const d = computeDerived(s);
+  const msg = `Namaste ${s.guardianName || "Guardian"}, ${s.name} (Class ${s.class} - ${streamsLabel(s)}) ki fee ₹${d.due} abhi due hai ${state.settings.instituteName} me. Kripya jald se jald bhugtan karne ka kasht karein. Dhanyavad.`;
+  const phone = String(s.guardianMobile || "").replace(/\D/g,"");
+  return `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
+}
+
+function getStreams(s){
+  if(Array.isArray(s.streams) && s.streams.length) return s.streams;
+  if(s.stream) return [s.stream];
+  return [];
+}
+function streamsLabel(s){
+  const arr = getStreams(s);
+  return arr.length ? arr.join(" + ") : "—";
+}
+
 function admissionYear(s){
   return s.admissionDate ? String(s.admissionDate).slice(0,4) : "";
 }
@@ -405,7 +424,7 @@ function availableYears(){
 function filteredStudents(){
   let list = state.students.slice();
   if(state.filterClass) list = list.filter(s=>s.class===state.filterClass);
-  if(state.filterStream) list = list.filter(s=>s.stream===state.filterStream);
+  if(state.filterStream) list = list.filter(s=>getStreams(s).includes(state.filterStream));
   if(state.filterYear) list = list.filter(s=>admissionYear(s)===state.filterYear);
   if(state.search.trim()){
     const q = state.search.trim().toLowerCase();
@@ -528,14 +547,14 @@ function renderDashboard(){
   const recent = recentPayments.slice(0,6);
 
   const byGroup = {};
-  CLASSES.forEach(c=> STREAMS.forEach(st=>{ byGroup[`${c}-${st}`] = {count:0, fee:0, collected:0}; }));
   list.forEach(s=>{
-    const key = `${s.class}-${s.stream}`;
-    if(!byGroup[key]) byGroup[key] = {count:0, fee:0, collected:0};
+    const key = `${s.class}__${streamsLabel(s)}`;
+    if(!byGroup[key]) byGroup[key] = {class:s.class, label:streamsLabel(s), count:0, fee:0, collected:0};
     byGroup[key].count++;
     byGroup[key].fee += Number(s.totalFee||0);
     byGroup[key].collected += computeDerived(s).paid;
   });
+  const groupRows = Object.values(byGroup).sort((a,b)=> a.class.localeCompare(b.class) || a.label.localeCompare(b.label));
 
   return `
   <div class="grid-stats">
@@ -549,20 +568,19 @@ function renderDashboard(){
   <div class="panel">
     <div class="panel-head"><h3>Class &amp; Stream Overview</h3></div>
     <table>
-      <thead><tr><th>Class</th><th>Stream</th><th>Students</th><th>Course Fee</th><th>Collected</th><th>Due</th></tr></thead>
+      <thead><tr><th>Class</th><th>Stream(s)</th><th>Students</th><th>Course Fee</th><th>Collected</th><th>Due</th></tr></thead>
       <tbody>
-        ${CLASSES.map(c=> STREAMS.map(st=>{
-          const g = byGroup[`${c}-${st}`];
+        ${groupRows.length ? groupRows.map(g=>{
           const due = g.fee - g.collected;
           return `<tr>
-            <td>Class ${c}</td>
-            <td><span class="tag">${st}</span></td>
+            <td>Class ${g.class}</td>
+            <td><span class="tag">${g.label}</span></td>
             <td>${g.count}</td>
             <td>${fmtMoney(g.fee)}</td>
             <td>${fmtMoney(g.collected)}</td>
             <td>${fmtMoney(due)}</td>
           </tr>`;
-        }).join("")).join("")}
+        }).join("") : `<tr class="empty-row"><td colspan="6">No students yet.</td></tr>`}
       </tbody>
     </table>
   </div>
@@ -638,7 +656,7 @@ function renderStudents(){
             <td class="cell-strong" style="cursor:pointer;" data-view="${s.id}">${escapeHtml(s.name)}</td>
             <td><span class="tag">${admissionYear(s)}</span></td>
             <td>Class ${s.class}</td>
-            <td><span class="tag">${s.stream}</span></td>
+            <td><span class="tag">${streamsLabel(s)}</span></td>
             <td>${escapeHtml(s.mobile)}</td>
             <td>${fmtMoney(s.totalFee)}</td>
             <td>${fmtMoney(d.paid)}</td>
@@ -679,7 +697,7 @@ function renderAdmissions(){
             <td class="cell-muted">${s.id}</td>
             <td class="cell-strong">${escapeHtml(s.name)}</td>
             <td>Class ${s.class}</td>
-            <td><span class="tag">${s.stream}</span></td>
+            <td><span class="tag">${streamsLabel(s)}</span></td>
             <td>${fmtDate(s.admissionDate)}</td>
             <td>${fmtMoney(s.totalFee)}</td>
             <td>${fmtMoney(initial)}</td>
@@ -708,13 +726,18 @@ function renderFees(){
           return `<tr>
             <td class="cell-muted">${s.id}</td>
             <td class="cell-strong">${escapeHtml(s.name)}</td>
-            <td>Class ${s.class} · ${s.stream}</td>
+            <td>Class ${s.class} · ${streamsLabel(s)}</td>
             <td>${fmtMoney(s.totalFee)}</td>
             <td>${fmtMoney(d.paid)}</td>
             <td>${fmtMoney(d.due)}</td>
             <td>${statusBadge(d.status)}</td>
             <td>${fmtDate(d.lastPaymentDate)}</td>
-            <td class="no-print"><button class="btn btn-primary btn-sm" data-pay="${s.id}" ${d.due<=0?"disabled":""}>Add Payment</button></td>
+            <td class="no-print">
+              <div class="row-actions">
+                <button class="btn btn-primary btn-sm" data-pay="${s.id}" ${d.due<=0?"disabled":""}>Add Payment</button>
+                <button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${(d.due<=0||!s.guardianMobile)?"disabled":""} title="${s.guardianMobile? "":"Add guardian's mobile number first"}">Remind</button>
+              </div>
+            </td>
           </tr>`;
         }).join("") : `<tr class="empty-row"><td colspan="9">No students match the current filters.</td></tr>`}
       </tbody>
@@ -753,7 +776,7 @@ function renderReports(){
           <div class="kv"><div class="k">Due</div><div class="v">${fmtMoney(fee-collected)}</div></div>
         </div>
         <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class</th><th>Stream</th><th>Admission Date</th></tr></thead>
-        <tbody>${rows.map(s=>`<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class}</td><td><span class="tag">${s.stream}</span></td><td>${fmtDate(s.admissionDate)}</td></tr>`).join("")}</tbody></table>
+        <tbody>${rows.map(s=>`<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class}</td><td><span class="tag">${streamsLabel(s)}</span></td><td>${fmtDate(s.admissionDate)}</td></tr>`).join("")}</tbody></table>
       </div>`;
     }).join("") : `<div class="panel"><div class="empty-row" style="padding:20px;">No admissions recorded yet.</div></div>`;
   }
@@ -763,13 +786,13 @@ function renderReports(){
       return `<div class="panel">
         <div class="panel-head"><h3>Class ${c} (${rows.length})</h3></div>
         <table><thead><tr><th>Admission ID</th><th>Name</th><th>Stream</th><th>Mobile</th><th>Fee</th><th>Due</th></tr></thead>
-        <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td><span class="tag">${s.stream}</span></td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.due)}</td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="6">No students in this class.</td></tr>`}</tbody></table>
+        <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td><span class="tag">${streamsLabel(s)}</span></td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.due)}</td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="6">No students in this class.</td></tr>`}</tbody></table>
       </div>`;
     }).join("");
   }
   else if(state.reportTab==="streamwise"){
     body = STREAMS.map(st=>{
-      const rows = list.filter(s=>s.stream===st);
+      const rows = list.filter(s=>getStreams(s).includes(st));
       return `<div class="panel">
         <div class="panel-head"><h3>${st} Stream (${rows.length})</h3></div>
         <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class</th><th>Mobile</th><th>Fee</th><th>Due</th></tr></thead>
@@ -778,23 +801,26 @@ function renderReports(){
     }).join("");
   }
   else if(state.reportTab==="collection"){
-    const rows = [];
-    CLASSES.forEach(c=>STREAMS.forEach(st=>{
-      const g = list.filter(s=>s.class===c && s.stream===st);
-      const fee = g.reduce((a,s)=>a+Number(s.totalFee||0),0);
-      const collected = g.reduce((a,s)=>a+computeDerived(s).paid,0);
-      rows.push({c,st,count:g.length,fee,collected,due:fee-collected});
-    }));
+    const byGroup = {};
+    list.forEach(s=>{
+      const key = `${s.class}__${streamsLabel(s)}`;
+      if(!byGroup[key]) byGroup[key] = {c:s.class, st:streamsLabel(s), count:0, fee:0, collected:0};
+      byGroup[key].count++;
+      byGroup[key].fee += Number(s.totalFee||0);
+      byGroup[key].collected += computeDerived(s).paid;
+    });
+    const rows = Object.values(byGroup).sort((a,b)=> a.c.localeCompare(b.c) || a.st.localeCompare(b.st));
     body = `<div class="panel"><div class="panel-head"><h3>Class-wise Fee Collection</h3></div>
-      <table><thead><tr><th>Class</th><th>Stream</th><th>Students</th><th>Total Fee</th><th>Collected</th><th>Due</th></tr></thead>
-      <tbody>${rows.map(r=>`<tr><td>Class ${r.c}</td><td><span class="tag">${r.st}</span></td><td>${r.count}</td><td>${fmtMoney(r.fee)}</td><td>${fmtMoney(r.collected)}</td><td>${fmtMoney(r.due)}</td></tr>`).join("")}</tbody></table>
+      <div class="hint" style="margin-bottom:10px;">Merged-stream students (e.g. English + Hindi) are counted once, under their combined group — so totals below never double-count a fee.</div>
+      <table><thead><tr><th>Class</th><th>Stream(s)</th><th>Students</th><th>Total Fee</th><th>Collected</th><th>Due</th></tr></thead>
+      <tbody>${rows.length? rows.map(r=>`<tr><td>Class ${r.c}</td><td><span class="tag">${r.st}</span></td><td>${r.count}</td><td>${fmtMoney(r.fee)}</td><td>${fmtMoney(r.collected)}</td><td>${fmtMoney(r.fee-r.collected)}</td></tr>`).join("") : `<tr class="empty-row"><td colspan="6">No students yet.</td></tr>`}</tbody></table>
     </div>`;
   }
   else if(state.reportTab==="pending"){
     const rows = list.filter(s=>computeDerived(s).due>0).sort((a,b)=>computeDerived(b).due-computeDerived(a).due);
     body = `<div class="panel"><div class="panel-head"><h3>Pending Fee List (${rows.length})</h3></div>
-      <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Mobile</th><th>Fee</th><th>Paid</th><th>Due</th></tr></thead>
-      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${s.stream}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="7">No pending dues. All fees collected.</td></tr>`}</tbody></table>
+      <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Mobile</th><th>Fee</th><th>Paid</th><th>Due</th><th class="no-print">Action</th></tr></thead>
+      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!s.guardianMobile?"disabled":""} title="${s.guardianMobile? "":"Add guardian's mobile number first"}">Remind</button></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="8">No pending dues. All fees collected.</td></tr>`}</tbody></table>
     </div>`;
   }
   else if(state.reportTab==="payments"){
@@ -810,7 +836,7 @@ function renderReports(){
     const rows = list.slice().sort((a,b)=>new Date(b.admissionDate)-new Date(a.admissionDate));
     body = `<div class="panel"><div class="panel-head"><h3>Admission History (${rows.length})</h3></div>
       <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Admission Date</th></tr></thead>
-      <tbody>${rows.length? rows.map(s=>`<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${s.stream}</td><td>${fmtDate(s.admissionDate)}</td></tr>`).join("") : `<tr class="empty-row"><td colspan="4">No admissions yet.</td></tr>`}</tbody></table>
+      <tbody>${rows.length? rows.map(s=>`<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${fmtDate(s.admissionDate)}</td></tr>`).join("") : `<tr class="empty-row"><td colspan="4">No admissions yet.</td></tr>`}</tbody></table>
     </div>`;
   }
 
@@ -853,6 +879,13 @@ function attachContentHandlers(){
   });
   document.querySelectorAll("[data-pay]").forEach(el=>{
     el.addEventListener("click", ()=> openPaymentForm(el.dataset.pay));
+  });
+  document.querySelectorAll("[data-remind]").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      const st = state.students.find(x=>x.id===el.dataset.remind);
+      if(!st) return;
+      window.open(buildReminderLink(st), "_blank");
+    });
   });
   const quickAdmit = document.getElementById("btnQuickAdmit");
   if(quickAdmit) quickAdmit.addEventListener("click", ()=> openStudentForm(null));
@@ -948,13 +981,17 @@ function openStudentForm(studentId){
           </select>
           <div class="err" data-err="class"></div>
         </div>
-        <div class="field">
-          <label>Stream / Category *</label>
-          <select class="input" name="stream" required>
-            <option value="">Select stream</option>
-            ${STREAMS.map(st=>`<option value="${st}" ${editing&&s.stream===st?"selected":""}>${st}</option>`).join("")}
-          </select>
-          <div class="err" data-err="stream"></div>
+        <div class="field full">
+          <label>Stream(s) / Category * — select more than one to merge courses under this one admission</label>
+          <div style="display:flex; gap:16px; flex-wrap:wrap; padding:9px 2px;">
+            ${STREAMS.map(st=>{
+              const checked = editing ? getStreams(s).includes(st) : false;
+              return `<label style="display:flex; align-items:center; gap:6px; font-size:13.5px; font-weight:500;">
+                <input type="checkbox" name="streams" value="${st}" ${checked?"checked":""} style="width:16px; height:16px;"/> ${st}
+              </label>`;
+            }).join("")}
+          </div>
+          <div class="err" data-err="streams"></div>
         </div>
         <div class="field">
           <label>Total Course Fee (₹) *</label>
@@ -967,6 +1004,37 @@ function openStudentForm(studentId){
           <input class="input" type="number" min="0" step="1" name="initialPayment" placeholder="0"/>
           <div class="hint">Optional — you can add payments later too.</div>
         </div>`}
+        <div class="field full" style="margin-top:6px; padding-top:10px; border-top:1px solid var(--line);">
+          <label style="font-size:13px;">Address</label>
+        </div>
+        <div class="field">
+          <label>City / Village</label>
+          <input class="input" name="village" value="${editing?escapeHtml(s.village||""):""}"/>
+        </div>
+        <div class="field">
+          <label>Ward No.</label>
+          <input class="input" name="ward" value="${editing?escapeHtml(s.ward||""):""}"/>
+        </div>
+        <div class="field">
+          <label>Block</label>
+          <input class="input" name="block" value="${editing?escapeHtml(s.block||""):""}"/>
+        </div>
+        <div class="field">
+          <label>Post</label>
+          <input class="input" name="post" value="${editing?escapeHtml(s.post||""):""}"/>
+        </div>
+        <div class="field">
+          <label>District</label>
+          <input class="input" name="district" value="${editing?escapeHtml(s.district||""):""}"/>
+        </div>
+        <div class="field">
+          <label>State</label>
+          <input class="input" name="state" value="${editing?escapeHtml(s.state||""):""}"/>
+        </div>
+        <div class="field">
+          <label>Nationality</label>
+          <input class="input" name="nationality" value="${editing? escapeHtml(s.nationality||"") : "Indian"}"/>
+        </div>
         <div class="field full">
           <label>Remarks (optional)</label>
           <input class="input" name="remarks" value="${editing?escapeHtml(s.remarks||""):""}" placeholder="Any additional notes"/>
@@ -986,6 +1054,7 @@ function openStudentForm(studentId){
     e.preventDefault();
     const f = new FormData(e.target);
     const data = Object.fromEntries(f.entries());
+    const selectedStreams = f.getAll("streams");
     document.querySelectorAll(".err").forEach(el=>el.textContent="");
 
     let ok = true;
@@ -997,7 +1066,7 @@ function openStudentForm(studentId){
     if(!validMobile(data.guardianMobile)) setErr("guardianMobile","Enter a valid 10-digit mobile number.");
     if(!data.admissionDate) setErr("admissionDate","Admission date is required.");
     if(!data.class) setErr("class","Please select a class.");
-    if(!data.stream) setErr("stream","Please select a stream.");
+    if(!selectedStreams.length) setErr("streams","Please select at least one stream.");
     if(!data.totalFee || Number(data.totalFee) <= 0) setErr("totalFee","Enter a valid course fee.");
 
     if(!ok) return;
@@ -1011,9 +1080,16 @@ function openStudentForm(studentId){
         guardianMobile: data.guardianMobile.trim(),
         admissionDate: data.admissionDate,
         class: data.class,
-        stream: data.stream,
+        streams: selectedStreams,
         totalFee: Number(data.totalFee),
         remarks: (data.remarks||"").trim(),
+        village: (data.village||"").trim(),
+        ward: (data.ward||"").trim(),
+        block: (data.block||"").trim(),
+        post: (data.post||"").trim(),
+        district: (data.district||"").trim(),
+        state: (data.state||"").trim(),
+        nationality: (data.nationality||"").trim(),
       });
       showToast("Student record updated.");
     } else {
@@ -1029,11 +1105,18 @@ function openStudentForm(studentId){
         mobile: data.mobile.trim(),
         guardianMobile: data.guardianMobile.trim(),
         class: data.class,
-        stream: data.stream,
+        streams: selectedStreams,
         admissionDate: data.admissionDate,
         totalFee: Number(data.totalFee),
         payments,
         remarks: (data.remarks||"").trim(),
+        village: (data.village||"").trim(),
+        ward: (data.ward||"").trim(),
+        block: (data.block||"").trim(),
+        post: (data.post||"").trim(),
+        district: (data.district||"").trim(),
+        state: (data.state||"").trim(),
+        nationality: (data.nationality||"").trim(),
       });
       showToast("New admission recorded.");
     }
@@ -1110,7 +1193,7 @@ function openProfile(studentId){
     <div class="profile-top">
       <div>
         <div class="profile-name">${escapeHtml(s.name)}</div>
-        <div class="profile-id">${s.id}${s.rollNumber? " · Roll No. "+escapeHtml(s.rollNumber) : ""} · Class ${s.class} · ${s.stream}</div>
+        <div class="profile-id">${s.id}${s.rollNumber? " · Roll No. "+escapeHtml(s.rollNumber) : ""} · Class ${s.class} · ${streamsLabel(s)}</div>
       </div>
       <div>${statusBadge(d.status)}</div>
     </div>
@@ -1126,6 +1209,18 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Due Amount</div><div class="v">${fmtMoney(d.due)}</div></div>
       <div class="kv"><div class="k">Last Payment</div><div class="v">${fmtDate(d.lastPaymentDate)}</div></div>
       <div class="kv"><div class="k">Remarks</div><div class="v">${s.remarks? escapeHtml(s.remarks) : "—"}</div></div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="panel-head" style="margin-bottom:10px;"><h3 style="font-size:14.5px;">Address</h3></div>
+    <div class="kv-grid">
+      <div class="kv"><div class="k">City / Village</div><div class="v">${s.village? escapeHtml(s.village) : "—"}</div></div>
+      <div class="kv"><div class="k">Ward No.</div><div class="v">${s.ward? escapeHtml(s.ward) : "—"}</div></div>
+      <div class="kv"><div class="k">Block</div><div class="v">${s.block? escapeHtml(s.block) : "—"}</div></div>
+      <div class="kv"><div class="k">Post</div><div class="v">${s.post? escapeHtml(s.post) : "—"}</div></div>
+      <div class="kv"><div class="k">District</div><div class="v">${s.district? escapeHtml(s.district) : "—"}</div></div>
+      <div class="kv"><div class="k">State</div><div class="v">${s.state? escapeHtml(s.state) : "—"}</div></div>
+      <div class="kv"><div class="k">Nationality</div><div class="v">${s.nationality? escapeHtml(s.nationality) : "—"}</div></div>
     </div>
 
     <div class="fee-bar"><div class="fee-bar-fill" style="width:${pct}%;"></div></div>
@@ -1240,4 +1335,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 2.3.0 — added Guardian's Mobile Number field -->
+<!-- VERSION 3.0.0 — added address fields, Hindi stream, multi-stream merge, WhatsApp fee reminders -->
