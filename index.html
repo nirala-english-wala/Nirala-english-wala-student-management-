@@ -227,7 +227,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.2.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -1050,6 +1050,10 @@ function openStudentForm(studentId){
           <input class="input" name="nationality" value="${editing? escapeHtml(s.nationality||"") : "Indian"}"/>
         </div>
         <div class="field full">
+          <label>Class 10 School / Coaching</label>
+          <input class="input" name="previousSchool" value="${editing?escapeHtml(s.previousSchool||""):""}" placeholder="Where the student studied in Class 10"/>
+        </div>
+        <div class="field full">
           <label>Remarks (optional)</label>
           <input class="input" name="remarks" value="${editing?escapeHtml(s.remarks||""):""}" placeholder="Any additional notes"/>
         </div>
@@ -1101,6 +1105,7 @@ function openStudentForm(studentId){
         class: data.class,
         streams: selectedStreams,
         totalFee: Number(data.totalFee),
+        previousSchool: (data.previousSchool||"").trim(),
         remarks: (data.remarks||"").trim(),
         village: (data.village||"").trim(),
         ward: (data.ward||"").trim(),
@@ -1131,6 +1136,7 @@ function openStudentForm(studentId){
         admissionDate: data.admissionDate,
         totalFee: Number(data.totalFee),
         payments,
+        previousSchool: (data.previousSchool||"").trim(),
         remarks: (data.remarks||"").trim(),
         village: (data.village||"").trim(),
         ward: (data.ward||"").trim(),
@@ -1233,6 +1239,7 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Amount Paid</div><div class="v">${fmtMoney(d.paid)}</div></div>
       <div class="kv"><div class="k">Due Amount</div><div class="v">${fmtMoney(d.due)}</div></div>
       <div class="kv"><div class="k">Last Payment</div><div class="v">${fmtDate(d.lastPaymentDate)}</div></div>
+      <div class="kv"><div class="k">Class 10 School / Coaching</div><div class="v">${s.previousSchool? escapeHtml(s.previousSchool) : "—"}</div></div>
       <div class="kv"><div class="k">Remarks</div><div class="v">${s.remarks? escapeHtml(s.remarks) : "—"}</div></div>
     </div>
 
@@ -1360,4 +1367,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 3.1.0 — split Father's/Mother's name, added Student & Guardian WhatsApp numbers -->
+<!-- VERSION 3.2.0 — added Class 10 School/Coaching field -->
