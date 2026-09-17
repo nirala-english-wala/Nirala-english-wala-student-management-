@@ -227,7 +227,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "3.0.0";
+const APP_VERSION = "3.1.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -397,8 +397,9 @@ function validMobile(m){ return /^[0-9]{10}$/.test(String(m||"").trim()); }
    Institute's designated numbers for this task: +91 9279701355, +91 8709322284 */
 function buildReminderLink(s){
   const d = computeDerived(s);
-  const msg = `Namaste ${s.guardianName || "Guardian"}, ${s.name} (Class ${s.class} - ${streamsLabel(s)}) ki fee ₹${d.due} abhi due hai ${state.settings.instituteName} me. Kripya jald se jald bhugtan karne ka kasht karein. Dhanyavad.`;
-  const phone = String(s.guardianMobile || "").replace(/\D/g,"");
+  const guardianLabel = s.fatherName || s.guardianName || s.motherName || "Guardian";
+  const msg = `Namaste ${guardianLabel}, ${s.name} (Class ${s.class} - ${streamsLabel(s)}) ki fee ₹${d.due} abhi due hai ${state.settings.instituteName} me. Kripya jald se jald bhugtan karne ka kasht karein. Dhanyavad.`;
+  const phone = String(s.guardianWhatsapp || s.guardianMobile || "").replace(/\D/g,"");
   return `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
 }
 
@@ -735,7 +736,7 @@ function renderFees(){
             <td class="no-print">
               <div class="row-actions">
                 <button class="btn btn-primary btn-sm" data-pay="${s.id}" ${d.due<=0?"disabled":""}>Add Payment</button>
-                <button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${(d.due<=0||!s.guardianMobile)?"disabled":""} title="${s.guardianMobile? "":"Add guardian's mobile number first"}">Remind</button>
+                <button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${(d.due<=0||!(s.guardianWhatsapp||s.guardianMobile))?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button>
               </div>
             </td>
           </tr>`;
@@ -820,7 +821,7 @@ function renderReports(){
     const rows = list.filter(s=>computeDerived(s).due>0).sort((a,b)=>computeDerived(b).due-computeDerived(a).due);
     body = `<div class="panel"><div class="panel-head"><h3>Pending Fee List (${rows.length})</h3></div>
       <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Mobile</th><th>Fee</th><th>Paid</th><th>Due</th><th class="no-print">Action</th></tr></thead>
-      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!s.guardianMobile?"disabled":""} title="${s.guardianMobile? "":"Add guardian's mobile number first"}">Remind</button></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="8">No pending dues. All fees collected.</td></tr>`}</tbody></table>
+      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!(s.guardianWhatsapp||s.guardianMobile)?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="8">No pending dues. All fees collected.</td></tr>`}</tbody></table>
     </div>`;
   }
   else if(state.reportTab==="payments"){
@@ -954,9 +955,13 @@ function openStudentForm(studentId){
           <input class="input" name="rollNumber" value="${editing?escapeHtml(s.rollNumber||""):""}" placeholder="e.g. 21"/>
         </div>
         <div class="field">
-          <label>Father's / Mother's Name *</label>
-          <input class="input" name="guardianName" value="${editing?escapeHtml(s.guardianName):""}" required/>
-          <div class="err" data-err="guardianName"></div>
+          <label>Father's Name *</label>
+          <input class="input" name="fatherName" value="${editing?escapeHtml(s.fatherName||s.guardianName||""):""}" required/>
+          <div class="err" data-err="fatherName"></div>
+        </div>
+        <div class="field">
+          <label>Mother's Name</label>
+          <input class="input" name="motherName" value="${editing?escapeHtml(s.motherName||""):""}"/>
         </div>
         <div class="field">
           <label>Student's Mobile Number *</label>
@@ -964,9 +969,18 @@ function openStudentForm(studentId){
           <div class="err" data-err="mobile"></div>
         </div>
         <div class="field">
+          <label>Student's WhatsApp Number</label>
+          <input class="input" name="studentWhatsapp" maxlength="10" value="${editing?escapeHtml(s.studentWhatsapp||""):""}" placeholder="Leave blank if same as mobile"/>
+        </div>
+        <div class="field">
           <label>Guardian's Mobile Number *</label>
           <input class="input" name="guardianMobile" maxlength="10" value="${editing?escapeHtml(s.guardianMobile||""):""}" placeholder="10-digit number" required/>
           <div class="err" data-err="guardianMobile"></div>
+        </div>
+        <div class="field">
+          <label>Guardian's WhatsApp Number *</label>
+          <input class="input" name="guardianWhatsapp" maxlength="10" value="${editing?escapeHtml(s.guardianWhatsapp||""):""}" placeholder="10-digit number — used for fee reminders" required/>
+          <div class="err" data-err="guardianWhatsapp"></div>
         </div>
         <div class="field">
           <label>Admission Date *</label>
@@ -1061,9 +1075,11 @@ function openStudentForm(studentId){
     const setErr = (field,msg)=>{ ok=false; const el = document.querySelector(`[data-err="${field}"]`); if(el) el.textContent = msg; };
 
     if(!data.name || !data.name.trim()) setErr("name","Student name is required.");
-    if(!data.guardianName || !data.guardianName.trim()) setErr("guardianName","Guardian's name is required.");
+    if(!data.fatherName || !data.fatherName.trim()) setErr("fatherName","Father's name is required.");
     if(!validMobile(data.mobile)) setErr("mobile","Enter a valid 10-digit mobile number.");
+    if(data.studentWhatsapp && !validMobile(data.studentWhatsapp)) setErr("studentWhatsapp","Enter a valid 10-digit number, or leave it blank.");
     if(!validMobile(data.guardianMobile)) setErr("guardianMobile","Enter a valid 10-digit mobile number.");
+    if(!validMobile(data.guardianWhatsapp)) setErr("guardianWhatsapp","Enter a valid 10-digit WhatsApp number.");
     if(!data.admissionDate) setErr("admissionDate","Admission date is required.");
     if(!data.class) setErr("class","Please select a class.");
     if(!selectedStreams.length) setErr("streams","Please select at least one stream.");
@@ -1075,9 +1091,12 @@ function openStudentForm(studentId){
       updateStudentDoc(admissionId, {
         name: data.name.trim(),
         rollNumber: (data.rollNumber||"").trim(),
-        guardianName: data.guardianName.trim(),
+        fatherName: data.fatherName.trim(),
+        motherName: (data.motherName||"").trim(),
         mobile: data.mobile.trim(),
+        studentWhatsapp: (data.studentWhatsapp||"").trim(),
         guardianMobile: data.guardianMobile.trim(),
+        guardianWhatsapp: data.guardianWhatsapp.trim(),
         admissionDate: data.admissionDate,
         class: data.class,
         streams: selectedStreams,
@@ -1101,9 +1120,12 @@ function openStudentForm(studentId){
       createStudentDoc(admissionId, {
         name: data.name.trim(),
         rollNumber: (data.rollNumber||"").trim(),
-        guardianName: data.guardianName.trim(),
+        fatherName: data.fatherName.trim(),
+        motherName: (data.motherName||"").trim(),
         mobile: data.mobile.trim(),
+        studentWhatsapp: (data.studentWhatsapp||"").trim(),
         guardianMobile: data.guardianMobile.trim(),
+        guardianWhatsapp: data.guardianWhatsapp.trim(),
         class: data.class,
         streams: selectedStreams,
         admissionDate: data.admissionDate,
@@ -1200,9 +1222,12 @@ function openProfile(studentId){
 
     <div class="kv-grid">
       <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
-      <div class="kv"><div class="k">Father's / Mother's Name</div><div class="v">${escapeHtml(s.guardianName)}</div></div>
-      <div class="kv"><div class="k">Mobile Number</div><div class="v">${escapeHtml(s.mobile)}</div></div>
+      <div class="kv"><div class="k">Father's Name</div><div class="v">${escapeHtml(s.fatherName || s.guardianName || "—")}</div></div>
+      <div class="kv"><div class="k">Mother's Name</div><div class="v">${s.motherName? escapeHtml(s.motherName) : "—"}</div></div>
+      <div class="kv"><div class="k">Student's Mobile Number</div><div class="v">${escapeHtml(s.mobile)}</div></div>
+      <div class="kv"><div class="k">Student's WhatsApp Number</div><div class="v">${s.studentWhatsapp? escapeHtml(s.studentWhatsapp) : "—"}</div></div>
       <div class="kv"><div class="k">Guardian's Mobile Number</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
+      <div class="kv"><div class="k">Guardian's WhatsApp Number</div><div class="v">${s.guardianWhatsapp? escapeHtml(s.guardianWhatsapp) : "—"}</div></div>
       <div class="kv"><div class="k">Admission Date</div><div class="v">${fmtDate(s.admissionDate)}</div></div>
       <div class="kv"><div class="k">Total Course Fee</div><div class="v">${fmtMoney(s.totalFee)}</div></div>
       <div class="kv"><div class="k">Amount Paid</div><div class="v">${fmtMoney(d.paid)}</div></div>
@@ -1335,4 +1360,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 3.0.0 — added address fields, Hindi stream, multi-stream merge, WhatsApp fee reminders -->
+<!-- VERSION 3.1.0 — split Father's/Mother's name, added Student & Guardian WhatsApp numbers -->
