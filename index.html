@@ -227,7 +227,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.2.1";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -398,7 +398,7 @@ function validMobile(m){ return /^[0-9]{10}$/.test(String(m||"").trim()); }
 function buildReminderLink(s){
   const d = computeDerived(s);
   const guardianLabel = s.fatherName || s.guardianName || s.motherName || "Guardian";
-  const msg = `Namaste ${guardianLabel}, ${s.name} (Class ${s.class} - ${streamsLabel(s)}) ki fee ₹${d.due} abhi due hai ${state.settings.instituteName} me. Kripya jald se jald bhugtan karne ka kasht karein. Dhanyavad.`;
+  const msg = `Dear ${guardianLabel}, a fee payment of ${fmtMoney(d.due)} is due for ${s.name} (Class ${s.class} - ${streamsLabel(s)}) at ${state.settings.instituteName}. Kindly clear the due amount at the earliest. Thank you.`;
   const phone = String(s.guardianWhatsapp || s.guardianMobile || "").replace(/\D/g,"");
   return `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
 }
@@ -1367,4 +1367,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 3.2.0 — added Class 10 School/Coaching field -->
+<!-- VERSION 3.2.1 — WhatsApp reminder message rewritten in English with formatted ₹ due amount -->
