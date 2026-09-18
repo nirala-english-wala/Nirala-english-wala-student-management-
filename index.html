@@ -227,7 +227,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "3.2.1";
+const APP_VERSION = "3.3.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -964,6 +964,10 @@ function openStudentForm(studentId){
           <input class="input" name="motherName" value="${editing?escapeHtml(s.motherName||""):""}"/>
         </div>
         <div class="field">
+          <label>Father's Occupation</label>
+          <input class="input" name="fatherOccupation" value="${editing?escapeHtml(s.fatherOccupation||""):""}"/>
+        </div>
+        <div class="field">
           <label>Student's Mobile Number *</label>
           <input class="input" name="mobile" maxlength="10" value="${editing?escapeHtml(s.mobile):""}" placeholder="10-digit number" required/>
           <div class="err" data-err="mobile"></div>
@@ -1097,6 +1101,7 @@ function openStudentForm(studentId){
         rollNumber: (data.rollNumber||"").trim(),
         fatherName: data.fatherName.trim(),
         motherName: (data.motherName||"").trim(),
+        fatherOccupation: (data.fatherOccupation||"").trim(),
         mobile: data.mobile.trim(),
         studentWhatsapp: (data.studentWhatsapp||"").trim(),
         guardianMobile: data.guardianMobile.trim(),
@@ -1127,6 +1132,7 @@ function openStudentForm(studentId){
         rollNumber: (data.rollNumber||"").trim(),
         fatherName: data.fatherName.trim(),
         motherName: (data.motherName||"").trim(),
+        fatherOccupation: (data.fatherOccupation||"").trim(),
         mobile: data.mobile.trim(),
         studentWhatsapp: (data.studentWhatsapp||"").trim(),
         guardianMobile: data.guardianMobile.trim(),
@@ -1230,6 +1236,7 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
       <div class="kv"><div class="k">Father's Name</div><div class="v">${escapeHtml(s.fatherName || s.guardianName || "—")}</div></div>
       <div class="kv"><div class="k">Mother's Name</div><div class="v">${s.motherName? escapeHtml(s.motherName) : "—"}</div></div>
+      <div class="kv"><div class="k">Father's Occupation</div><div class="v">${s.fatherOccupation? escapeHtml(s.fatherOccupation) : "—"}</div></div>
       <div class="kv"><div class="k">Student's Mobile Number</div><div class="v">${escapeHtml(s.mobile)}</div></div>
       <div class="kv"><div class="k">Student's WhatsApp Number</div><div class="v">${s.studentWhatsapp? escapeHtml(s.studentWhatsapp) : "—"}</div></div>
       <div class="kv"><div class="k">Guardian's Mobile Number</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
@@ -1367,4 +1374,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 3.2.1 — WhatsApp reminder message rewritten in English with formatted ₹ due amount -->
+<!-- VERSION 3.3.0 — added Father's Occupation field -->
