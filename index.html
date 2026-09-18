@@ -207,6 +207,9 @@
     .sidebar, .topbar .btn, .no-print, .menu-btn{display:none !important;}
     body{background:#fff;}
     .panel{border:none; box-shadow:none;}
+    body.receipt-mode > #app{display:none !important;}
+    body.receipt-mode .overlay{position:static !important; background:none !important; padding:0 !important; display:block !important;}
+    body.receipt-mode .modal{box-shadow:none !important; max-width:100% !important; margin:0 !important;}
   }
 </style>
 <!-- Firebase (Firestore + Authentication) -->
@@ -227,7 +230,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "3.3.0";
+const APP_VERSION = "4.0.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -315,13 +318,24 @@ function uid(){ return Math.random().toString(36).slice(2,9); }
 
 function computeDerived(s){
   const paid = (s.payments||[]).reduce((a,p)=>a+Number(p.amount||0),0);
-  const due = Math.max(0, Number(s.totalFee||0) - paid);
+  const discount = Number(s.discount||0);
+  const netFee = Math.max(0, Number(s.totalFee||0) - discount);
+  const due = Math.max(0, netFee - paid);
   let status = "due";
   if (paid <= 0) status = "due";
   else if (due <= 0) status = "paid";
   else status = "partial";
   const lastPayment = (s.payments||[]).slice().sort((a,b)=> new Date(b.date)-new Date(a.date))[0];
-  return { paid, due, status, lastPaymentDate: lastPayment ? lastPayment.date : null };
+  return { paid, due, netFee, discount, status, lastPaymentDate: lastPayment ? lastPayment.date : null };
+}
+
+function daysOverdue(s){
+  const d = computeDerived(s);
+  if(d.due<=0 || !s.admissionDate) return 0;
+  const start = new Date(s.admissionDate);
+  const now = new Date();
+  const diff = Math.floor((now - start) / (1000*60*60*24));
+  return Math.max(0, diff);
 }
 
 function nextAdmissionId(){
@@ -371,6 +385,56 @@ function showToast(msg){
   t.classList.add("show");
   clearTimeout(window.__toastTimer);
   window.__toastTimer = setTimeout(()=>t.classList.remove("show"), 2600);
+}
+
+/* =========================================================
+   DATA EXPORT (backup) — CSV files that open directly in Excel
+   ========================================================= */
+function csvEscape(val){
+  const str = String(val ?? "");
+  if(/[",\n]/.test(str)) return `"${str.replace(/"/g,'""')}"`;
+  return str;
+}
+function downloadCSV(filename, rows){
+  const csv = rows.map(row => row.map(csvEscape).join(",")).join("\r\n");
+  const blob = new Blob(["\ufeff" + csv], {type: "text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function exportStudentsCSV(){
+  const headers = ["Admission ID","Roll No","Name","Father's Name","Mother's Name","Father's Occupation",
+    "Class","Stream(s)","Batch Year","Admission Date","Student Mobile","Student WhatsApp",
+    "Guardian Mobile","Guardian WhatsApp","Village/City","Ward No","Block","Post","District","State","Nationality",
+    "Class 10 School/Coaching","Total Fee","Discount","Net Fee","Paid","Due","Status","Days Overdue","Last Payment Date","Remarks"];
+  const rows = [headers];
+  state.students.slice().sort((a,b)=>new Date(b.admissionDate)-new Date(a.admissionDate)).forEach(s=>{
+    const d = computeDerived(s);
+    rows.push([
+      s.id, s.rollNumber||"", s.name, s.fatherName||s.guardianName||"", s.motherName||"", s.fatherOccupation||"",
+      s.class, streamsLabel(s), admissionYear(s), s.admissionDate, s.mobile, s.studentWhatsapp||"",
+      s.guardianMobile||"", s.guardianWhatsapp||"", s.village||"", s.ward||"", s.block||"", s.post||"", s.district||"", s.state||"", s.nationality||"",
+      s.previousSchool||"", s.totalFee, d.discount, d.netFee, d.paid, d.due, d.status, daysOverdue(s), d.lastPaymentDate||"", s.remarks||""
+    ]);
+  });
+  downloadCSV(`students-backup-${todayStr()}.csv`, rows);
+  showToast("Students exported.");
+}
+function exportPaymentsCSV(){
+  const headers = ["Admission ID","Student Name","Payment Date","Amount"];
+  const rows = [headers];
+  state.students.slice().forEach(s=>{
+    (s.payments||[]).forEach(p=>{
+      rows.push([s.id, s.name, p.date, p.amount]);
+    });
+  });
+  downloadCSV(`payments-backup-${todayStr()}.csv`, rows);
+  showToast("Payment history exported.");
 }
 
 /* =========================================================
@@ -720,10 +784,11 @@ function renderFees(){
   <div class="panel">
     <div class="panel-head"><h3>Fee Status (${list.length})</h3></div>
     <table>
-      <thead><tr><th>Admission ID</th><th>Name</th><th>Class / Stream</th><th>Fee</th><th>Paid</th><th>Due</th><th>Status</th><th>Last Payment</th><th class="no-print">Action</th></tr></thead>
+      <thead><tr><th>Admission ID</th><th>Name</th><th>Class / Stream</th><th>Fee</th><th>Paid</th><th>Due</th><th>Overdue</th><th>Status</th><th>Last Payment</th><th class="no-print">Action</th></tr></thead>
       <tbody>
         ${list.length ? list.map(s=>{
           const d = computeDerived(s);
+          const days = daysOverdue(s);
           return `<tr>
             <td class="cell-muted">${s.id}</td>
             <td class="cell-strong">${escapeHtml(s.name)}</td>
@@ -731,6 +796,7 @@ function renderFees(){
             <td>${fmtMoney(s.totalFee)}</td>
             <td>${fmtMoney(d.paid)}</td>
             <td>${fmtMoney(d.due)}</td>
+            <td>${days>0? `${days}d` : "—"}</td>
             <td>${statusBadge(d.status)}</td>
             <td>${fmtDate(d.lastPaymentDate)}</td>
             <td class="no-print">
@@ -740,7 +806,7 @@ function renderFees(){
               </div>
             </td>
           </tr>`;
-        }).join("") : `<tr class="empty-row"><td colspan="9">No students match the current filters.</td></tr>`}
+        }).join("") : `<tr class="empty-row"><td colspan="10">No students match the current filters.</td></tr>`}
       </tbody>
     </table>
   </div>
@@ -818,10 +884,10 @@ function renderReports(){
     </div>`;
   }
   else if(state.reportTab==="pending"){
-    const rows = list.filter(s=>computeDerived(s).due>0).sort((a,b)=>computeDerived(b).due-computeDerived(a).due);
+    const rows = list.filter(s=>computeDerived(s).due>0).sort((a,b)=>daysOverdue(b)-daysOverdue(a));
     body = `<div class="panel"><div class="panel-head"><h3>Pending Fee List (${rows.length})</h3></div>
-      <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Mobile</th><th>Fee</th><th>Paid</th><th>Due</th><th class="no-print">Action</th></tr></thead>
-      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!(s.guardianWhatsapp||s.guardianMobile)?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="8">No pending dues. All fees collected.</td></tr>`}</tbody></table>
+      <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Mobile</th><th>Fee</th><th>Paid</th><th>Due</th><th>Days Overdue</th><th class="no-print">Action</th></tr></thead>
+      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); const days=daysOverdue(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td>${days>0? `<span class="badge badge-due"><span class="badge-dot"></span>${days} day${days===1?"":"s"}</span>` : "—"}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!(s.guardianWhatsapp||s.guardianMobile)?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="9">No pending dues. All fees collected.</td></tr>`}</tbody></table>
     </div>`;
   }
   else if(state.reportTab==="payments"){
@@ -847,7 +913,11 @@ function renderReports(){
       <div class="filters-row" style="flex-wrap:wrap;">
         ${tabs.map(([id,label])=>`<button class="btn ${state.reportTab===id?'btn-primary':'btn-ghost'} btn-sm" data-report-tab="${id}">${label}</button>`).join("")}
       </div>
-      <button class="btn btn-ghost btn-sm" id="btnPrint">Print report</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-ghost btn-sm" id="btnExportStudents">Export Students (Excel)</button>
+        <button class="btn btn-ghost btn-sm" id="btnExportPayments">Export Payments (Excel)</button>
+        <button class="btn btn-ghost btn-sm" id="btnPrint">Print report</button>
+      </div>
     </div>
   </div>
   ${body}
@@ -896,6 +966,10 @@ function attachContentHandlers(){
   });
   const printBtn = document.getElementById("btnPrint");
   if(printBtn) printBtn.addEventListener("click", ()=> window.print());
+  const exportStudentsBtn = document.getElementById("btnExportStudents");
+  if(exportStudentsBtn) exportStudentsBtn.addEventListener("click", exportStudentsCSV);
+  const exportPaymentsBtn = document.getElementById("btnExportPayments");
+  if(exportPaymentsBtn) exportPaymentsBtn.addEventListener("click", exportPaymentsCSV);
 }
 
 // re-render only the list-bearing content without losing input focus while typing search
@@ -1016,6 +1090,11 @@ function openStudentForm(studentId){
           <input class="input" type="number" min="0" step="1" name="totalFee" value="${editing?s.totalFee:""}" required/>
           <div class="err" data-err="totalFee"></div>
         </div>
+        <div class="field">
+          <label>Discount / Scholarship (₹)</label>
+          <input class="input" type="number" min="0" step="1" name="discount" value="${editing?(s.discount||""):""}" placeholder="0"/>
+          <div class="hint">Reduces the fee this student actually owes.</div>
+        </div>
         ${editing? "" : `
         <div class="field">
           <label>Initial Payment (₹)</label>
@@ -1110,6 +1189,7 @@ function openStudentForm(studentId){
         class: data.class,
         streams: selectedStreams,
         totalFee: Number(data.totalFee),
+        discount: Number(data.discount||0),
         previousSchool: (data.previousSchool||"").trim(),
         remarks: (data.remarks||"").trim(),
         village: (data.village||"").trim(),
@@ -1141,6 +1221,7 @@ function openStudentForm(studentId){
         streams: selectedStreams,
         admissionDate: data.admissionDate,
         totalFee: Number(data.totalFee),
+        discount: Number(data.discount||0),
         payments,
         previousSchool: (data.previousSchool||"").trim(),
         remarks: (data.remarks||"").trim(),
@@ -1205,6 +1286,11 @@ function openPaymentForm(studentId){
     updateStudentDoc(s.id, { payments: newPayments });
     showToast("Payment recorded.");
     closeOverlay();
+    const newIndex = newPayments.length - 1;
+    const cumulativePaid = d.paid + amt;
+    const receiptNo = `${s.id}-R${String(newIndex+1).padStart(2,"0")}`;
+    openOverlay(renderReceiptModal(s, {date:data.date, amount:amt}, cumulativePaid, d.netFee, receiptNo));
+    wireReceiptModal();
   });
 }
 
@@ -1215,7 +1301,7 @@ function openProfile(studentId){
   const s = state.students.find(x=>x.id===studentId);
   if(!s) return;
   const d = computeDerived(s);
-  const pct = s.totalFee>0 ? Math.min(100, Math.round((d.paid/s.totalFee)*100)) : 0;
+  const pct = d.netFee>0 ? Math.min(100, Math.round((d.paid/d.netFee)*100)) : 100;
   const paymentsSorted = (s.payments||[]).slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
 
   const html = `
@@ -1243,6 +1329,8 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Guardian's WhatsApp Number</div><div class="v">${s.guardianWhatsapp? escapeHtml(s.guardianWhatsapp) : "—"}</div></div>
       <div class="kv"><div class="k">Admission Date</div><div class="v">${fmtDate(s.admissionDate)}</div></div>
       <div class="kv"><div class="k">Total Course Fee</div><div class="v">${fmtMoney(s.totalFee)}</div></div>
+      <div class="kv"><div class="k">Discount / Scholarship</div><div class="v">${d.discount>0? fmtMoney(d.discount) : "—"}</div></div>
+      <div class="kv"><div class="k">Net Fee Payable</div><div class="v">${fmtMoney(d.netFee)}</div></div>
       <div class="kv"><div class="k">Amount Paid</div><div class="v">${fmtMoney(d.paid)}</div></div>
       <div class="kv"><div class="k">Due Amount</div><div class="v">${fmtMoney(d.due)}</div></div>
       <div class="kv"><div class="k">Last Payment</div><div class="v">${fmtDate(d.lastPaymentDate)}</div></div>
@@ -1271,9 +1359,12 @@ function openProfile(studentId){
       <button class="btn btn-primary btn-sm no-print" id="btnAddPaymentProfile" ${d.due<=0?"disabled":""}>Add Payment</button>
     </div>
     <table>
-      <thead><tr><th>Date</th><th>Amount</th></tr></thead>
+      <thead><tr><th>Date</th><th>Amount</th><th class="no-print">Receipt</th></tr></thead>
       <tbody>
-        ${paymentsSorted.length ? paymentsSorted.map(p=>`<tr><td>${fmtDate(p.date)}</td><td>${fmtMoney(p.amount)}</td></tr>`).join("") : `<tr class="empty-row"><td colspan="2">No payments recorded yet.</td></tr>`}
+        ${paymentsSorted.length ? paymentsSorted.map(p=>{
+          const rawIndex = s.payments.indexOf(p);
+          return `<tr><td>${fmtDate(p.date)}</td><td>${fmtMoney(p.amount)}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-receipt="${s.id}" data-payment-index="${rawIndex}">View</button></td></tr>`;
+        }).join("") : `<tr class="empty-row"><td colspan="3">No payments recorded yet.</td></tr>`}
       </tbody>
     </table>
 
@@ -1287,11 +1378,80 @@ function openProfile(studentId){
   document.getElementById("btnAddPaymentProfile").addEventListener("click", ()=>{ closeOverlay(); openPaymentForm(s.id); });
   document.getElementById("btnEditProfile").addEventListener("click", ()=>{ closeOverlay(); openStudentForm(s.id); });
   document.getElementById("btnDeleteProfile").addEventListener("click", ()=>{ closeOverlay(); confirmDelete(s.id); });
+  document.querySelectorAll("[data-receipt]").forEach(el=>{
+    el.addEventListener("click", ()=> openReceipt(el.dataset.receipt, Number(el.dataset.paymentIndex)));
+  });
 }
 
 /* =========================================================
-   DELETE CONFIRMATION
+   FEE RECEIPT
    ========================================================= */
+function renderReceiptModal(s, payment, cumulativePaid, netFee, receiptNo){
+  const balanceAtThatPoint = Math.max(0, netFee - cumulativePaid);
+  return `
+  <div class="modal" id="receiptModal" style="max-width:480px;">
+    <div class="modal-head no-print">
+      <h2>Fee Receipt</h2>
+      <button class="modal-close" id="closeModal">&times;</button>
+    </div>
+    <div id="receiptPrintArea" style="border:1px solid var(--line); border-radius:10px; padding:22px;">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid var(--line);">
+        <img src="${LOGO_SRC}" alt="logo" style="width:44px; height:44px; border-radius:8px; object-fit:cover;"/>
+        <div>
+          <div style="font-family:'Fraunces',serif; font-weight:600; font-size:16px;">${escapeHtml(state.settings.instituteName)}</div>
+          <div class="hint">Fee Payment Receipt</div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:12.5px; color:var(--muted); margin-bottom:14px;">
+        <div>Receipt No: <strong style="color:var(--text);">${receiptNo}</strong></div>
+        <div>Date: <strong style="color:var(--text);">${fmtDate(payment.date)}</strong></div>
+      </div>
+      <div class="kv-grid" style="margin:0 0 16px 0;">
+        <div class="kv"><div class="k">Student Name</div><div class="v">${escapeHtml(s.name)}</div></div>
+        <div class="kv"><div class="k">Admission ID</div><div class="v">${s.id}</div></div>
+        <div class="kv"><div class="k">Class / Stream</div><div class="v">Class ${s.class} · ${streamsLabel(s)}</div></div>
+        <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
+      </div>
+      <div class="divider"></div>
+      <table style="margin-bottom:14px;">
+        <tbody>
+          <tr><td class="cell-muted">Amount Received</td><td style="text-align:right; font-weight:700; font-size:16px;">${fmtMoney(payment.amount)}</td></tr>
+          <tr><td class="cell-muted">Total Paid Till Date</td><td style="text-align:right;">${fmtMoney(cumulativePaid)}</td></tr>
+          <tr><td class="cell-muted">Balance Remaining</td><td style="text-align:right;">${fmtMoney(balanceAtThatPoint)}</td></tr>
+        </tbody>
+      </table>
+      <div class="hint" style="text-align:center;">Thank you for your payment.</div>
+    </div>
+    <div class="form-actions no-print">
+      <button type="button" class="btn btn-ghost" id="cancelModal">Close</button>
+      <button type="button" class="btn btn-primary" id="btnPrintReceipt">Print / Save PDF</button>
+    </div>
+  </div>`;
+}
+
+function wireReceiptModal(){
+  document.getElementById("closeModal").addEventListener("click", closeOverlay);
+  document.getElementById("cancelModal").addEventListener("click", closeOverlay);
+  document.getElementById("btnPrintReceipt").addEventListener("click", ()=>{
+    document.body.classList.add("receipt-mode");
+    window.print();
+  });
+}
+
+function openReceipt(studentId, paymentIndex){
+  const s = state.students.find(x=>x.id===studentId);
+  if(!s) return;
+  const payment = (s.payments||[])[paymentIndex];
+  if(!payment) return;
+  const cumulativePaid = s.payments.slice(0, paymentIndex+1).reduce((a,p)=>a+Number(p.amount||0),0);
+  const d = computeDerived(s);
+  const receiptNo = `${s.id}-R${String(paymentIndex+1).padStart(2,"0")}`;
+  openOverlay(renderReceiptModal(s, payment, cumulativePaid, d.netFee, receiptNo));
+  wireReceiptModal();
+}
+window.addEventListener("afterprint", ()=>{ document.body.classList.remove("receipt-mode"); });
+
+
 function confirmDelete(studentId){
   const s = state.students.find(x=>x.id===studentId);
   if(!s) return;
@@ -1374,4 +1534,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 3.3.0 — added Father's Occupation field -->
+<!-- VERSION 4.0.0 — added Fee Receipts, Excel/CSV backup export, Discount/Scholarship, Days Overdue tracking -->
