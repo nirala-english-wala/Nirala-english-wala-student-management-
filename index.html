@@ -230,7 +230,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.0.1";
+const APP_VERSION = "4.1.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -302,6 +302,7 @@ const LOGO_SRC = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDAwM
 
 let state = {
   students: [],
+  feeRates: {},
   settings: { instituteName: "Nirala English Wala & Arts" },
   loaded: false,
   authChecked: false,
@@ -361,6 +362,19 @@ function attachStudentsListener(){
     showToast("Sync error: " + err.message);
     render();
   });
+}
+
+let unsubscribeFeeRates = null;
+function attachFeeRatesListener(){
+  if(unsubscribeFeeRates) return;
+  unsubscribeFeeRates = db.collection("settings").doc("feeRates").onSnapshot((doc)=>{
+    state.feeRates = doc.exists ? (doc.data()||{}) : {};
+    if(state.view==="feesettings") render();
+  }, (err)=>{ showToast("Fee rates sync error: " + err.message); });
+}
+function suggestedFee(cls, streamsArr){
+  if(!cls || !streamsArr || !streamsArr.length) return 0;
+  return streamsArr.reduce((sum, st)=> sum + Number((state.feeRates||{})[`${cls}-${st}`] || 0), 0);
 }
 
 async function createStudentDoc(id, data){
@@ -515,6 +529,7 @@ const ICONS = {
   search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`,
   menu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>`,
+  settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>`,
 };
 
 /* =========================================================
@@ -537,6 +552,7 @@ function render(){
     admissions:"Admission Management",
     fees:"Fee Management",
     reports:"Reports",
+    feesettings:"Fee Settings",
   };
   app.innerHTML = `
     <div class="sidebar ${state.sidebarOpen?'open':''}" id="sidebar">
@@ -552,6 +568,7 @@ function render(){
       ${navItem("admissions", ICONS.admission, "Admissions")}
       ${navItem("fees", ICONS.fees, "Fee Management")}
       ${navItem("reports", ICONS.reports, "Reports")}
+      ${navItem("feesettings", ICONS.settings, "Fee Settings")}
       <div class="sidebar-foot">
         Classes tracked: 11 &amp; 12<br/>Streams: English &amp; Arts
         <div style="margin-top:10px; opacity:.8;">Ledger version ${APP_VERSION}</div>
@@ -589,6 +606,7 @@ function render(){
   else if(state.view==="admissions") content.innerHTML = renderAdmissions();
   else if(state.view==="fees") content.innerHTML = renderFees();
   else if(state.view==="reports") content.innerHTML = renderReports();
+  else if(state.view==="feesettings") content.innerHTML = renderFeeSettings();
 
   attachContentHandlers();
 }
@@ -925,6 +943,33 @@ function renderReports(){
 }
 
 /* =========================================================
+   FEE SETTINGS — fixed default fee per Class + Stream
+   ========================================================= */
+function renderFeeSettings(){
+  return `
+  <div class="panel">
+    <div class="panel-head"><h3>Default Fee per Class &amp; Stream</h3></div>
+    <div class="hint" style="margin-bottom:16px;">Set a fixed fee for each subject/stream. When admitting a new student, the Total Course Fee will auto-fill based on the class and stream(s) selected — added together if more than one stream is chosen. You can still type a different amount for any individual student any time.</div>
+    <form id="feeRatesForm">
+      <div class="form-grid">
+        ${CLASSES.map(c=> STREAMS.map(st=>{
+          const key = `${c}-${st}`;
+          const val = state.feeRates[key] || "";
+          return `<div class="field">
+            <label>Class ${c} — ${st} (₹)</label>
+            <input class="input" type="number" min="0" step="1" name="${key}" value="${val}" placeholder="0"/>
+          </div>`;
+        }).join("")).join("")}
+      </div>
+      <div class="form-actions" style="justify-content:flex-start;">
+        <button type="submit" class="btn btn-primary">Save Fee Rates</button>
+      </div>
+    </form>
+  </div>
+  `;
+}
+
+/* =========================================================
    CONTENT INTERACTION HANDLERS
    ========================================================= */
 function attachContentHandlers(){
@@ -970,6 +1015,22 @@ function attachContentHandlers(){
   if(exportStudentsBtn) exportStudentsBtn.addEventListener("click", exportStudentsCSV);
   const exportPaymentsBtn = document.getElementById("btnExportPayments");
   if(exportPaymentsBtn) exportPaymentsBtn.addEventListener("click", exportPaymentsCSV);
+  const feeRatesForm = document.getElementById("feeRatesForm");
+  if(feeRatesForm){
+    feeRatesForm.addEventListener("submit", (e)=>{
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const rates = {};
+      CLASSES.forEach(c=> STREAMS.forEach(st=>{
+        const key = `${c}-${st}`;
+        const v = Number(f.get(key) || 0);
+        if(v>0) rates[key] = v;
+      }));
+      db.collection("settings").doc("feeRates").set(rates)
+        .then(()=> showToast("Fee rates saved."))
+        .catch(err=> showToast("Could not save: " + err.message));
+    });
+  }
 }
 
 // re-render only the list-bearing content without losing input focus while typing search
@@ -1069,7 +1130,7 @@ function openStudentForm(studentId){
         </div>
         <div class="field">
           <label>Class *</label>
-          <select class="input" name="class" required>
+          <select class="input" name="class" id="classSelect" required>
             <option value="">Select class</option>
             ${CLASSES.map(c=>`<option value="${c}" ${editing&&s.class===c?"selected":""}>Class ${c}</option>`).join("")}
           </select>
@@ -1081,7 +1142,7 @@ function openStudentForm(studentId){
             ${STREAMS.map(st=>{
               const checked = editing ? getStreams(s).includes(st) : false;
               return `<label style="display:flex; align-items:center; gap:6px; font-size:13.5px; font-weight:500;">
-                <input type="checkbox" name="streams" value="${st}" ${checked?"checked":""} style="width:16px; height:16px;"/> ${st}
+                <input type="checkbox" name="streams" class="streamCheckbox" value="${st}" ${checked?"checked":""} style="width:16px; height:16px;"/> ${st}
               </label>`;
             }).join("")}
           </div>
@@ -1089,8 +1150,12 @@ function openStudentForm(studentId){
         </div>
         <div class="field">
           <label>Total Course Fee (₹) *</label>
-          <input class="input" type="number" min="0" step="1" name="totalFee" value="${editing?s.totalFee:""}" required/>
+          <div style="display:flex; gap:8px;">
+            <input class="input" type="number" min="0" step="1" name="totalFee" id="totalFeeInput" value="${editing?s.totalFee:""}" required style="flex:1;"/>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnApplyStandardFee">Use standard rate</button>
+          </div>
           <div class="err" data-err="totalFee"></div>
+          <div class="hint" id="feeSuggestHint"></div>
         </div>
         <div class="field">
           <label>Discount / Scholarship (₹)</label>
@@ -1153,6 +1218,40 @@ function openStudentForm(studentId){
   openOverlay(html);
   document.getElementById("closeModal").addEventListener("click", closeOverlay);
   document.getElementById("cancelModal").addEventListener("click", closeOverlay);
+
+  function currentSelectedStreams(){
+    return Array.from(document.querySelectorAll(".streamCheckbox:checked")).map(el=>el.value);
+  }
+  function refreshFeeSuggestion(){
+    const cls = document.getElementById("classSelect").value;
+    const picked = currentSelectedStreams();
+    const suggestion = suggestedFee(cls, picked);
+    const hintEl = document.getElementById("feeSuggestHint");
+    const feeInput = document.getElementById("totalFeeInput");
+    if(cls && picked.length && suggestion>0){
+      hintEl.textContent = `Standard rate for this selection: ${fmtMoney(suggestion)}`;
+      if(!editing) feeInput.value = suggestion;
+    } else if(cls && picked.length){
+      hintEl.textContent = `No standard rate set yet for this selection — set it under "Fee Settings".`;
+    } else {
+      hintEl.textContent = "";
+    }
+  }
+  document.getElementById("classSelect").addEventListener("change", refreshFeeSuggestion);
+  document.querySelectorAll(".streamCheckbox").forEach(cb=> cb.addEventListener("change", refreshFeeSuggestion));
+  document.getElementById("btnApplyStandardFee").addEventListener("click", ()=>{
+    const cls = document.getElementById("classSelect").value;
+    const picked = currentSelectedStreams();
+    const suggestion = suggestedFee(cls, picked);
+    if(cls && picked.length && suggestion>0){
+      document.getElementById("totalFeeInput").value = suggestion;
+      showToast("Standard rate applied.");
+    } else {
+      showToast("No standard rate set for this class/stream selection.");
+    }
+  });
+  refreshFeeSuggestion();
+
   document.getElementById("studentForm").addEventListener("submit", (e)=>{
     e.preventDefault();
     const f = new FormData(e.target);
@@ -1524,8 +1623,10 @@ auth.onAuthStateChanged((user)=>{
     hideLockScreen();
     render();
     attachStudentsListener();
+    attachFeeRatesListener();
   } else {
     if(unsubscribeStudents){ unsubscribeStudents(); unsubscribeStudents = null; }
+    if(unsubscribeFeeRates){ unsubscribeFeeRates(); unsubscribeFeeRates = null; }
     state.students = [];
     state.loaded = false;
     const appEl = document.getElementById("app");
@@ -1536,4 +1637,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.0.1 — fixed receipt close button bug (overlays no longer stack on top of each other) -->
+<!-- VERSION 4.1.0 — added Fee Settings (fixed default fee per Class+Stream, auto-fill on admission, editable) -->
