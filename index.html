@@ -230,7 +230,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.0.0";
+const APP_VERSION = "4.0.1";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -986,6 +986,8 @@ function syncListOnly(){
    MODALS: overlay helper
    ========================================================= */
 function openOverlay(html){
+  const existing = document.getElementById("overlayRoot");
+  if(existing) existing.remove();
   const wrap = document.createElement("div");
   wrap.className = "overlay";
   wrap.id = "overlayRoot";
@@ -1534,4 +1536,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.0.0 — added Fee Receipts, Excel/CSV backup export, Discount/Scholarship, Days Overdue tracking -->
+<!-- VERSION 4.0.1 — fixed receipt close button bug (overlays no longer stack on top of each other) -->
