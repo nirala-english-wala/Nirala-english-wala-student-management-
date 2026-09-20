@@ -230,7 +230,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.1.0";
+const APP_VERSION = "4.2.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -337,6 +337,21 @@ function daysOverdue(s){
   const now = new Date();
   const diff = Math.floor((now - start) / (1000*60*60*24));
   return Math.max(0, diff);
+}
+
+function installmentStatuses(s){
+  const list = (s.installments||[]).slice().sort((a,b)=> new Date(a.date)-new Date(b.date));
+  const d = computeDerived(s);
+  let cumulative = 0;
+  const today = new Date();
+  return list.map((inst, idx)=>{
+    cumulative += Number(inst.amount||0);
+    let status;
+    if(d.paid >= cumulative) status = "paid";
+    else if(new Date(inst.date) < today) status = "overdue";
+    else status = "upcoming";
+    return { ...inst, idx, status, cumulative };
+  });
 }
 
 function nextAdmissionId(){
@@ -719,6 +734,19 @@ function statusBadge(status){
   return `<span class="badge badge-due"><span class="badge-dot"></span>Due</span>`;
 }
 
+function installmentBadge(status){
+  if(status==="paid") return `<span class="badge badge-paid"><span class="badge-dot"></span>Paid</span>`;
+  if(status==="overdue") return `<span class="badge badge-due"><span class="badge-dot"></span>Overdue</span>`;
+  return `<span class="badge badge-partial"><span class="badge-dot"></span>Upcoming</span>`;
+}
+
+function readmissionBadge(status){
+  if(status==="readmitted") return `<span class="badge badge-paid"><span class="badge-dot"></span>Re-admitted</span>`;
+  if(status==="left") return `<span class="badge badge-due"><span class="badge-dot"></span>Not Continuing</span>`;
+  if(status==="pending") return `<span class="badge badge-partial"><span class="badge-dot"></span>Pending</span>`;
+  return `<span class="tag">N/A</span>`;
+}
+
 function renderStudents(){
   const list = filteredStudents();
   return `
@@ -843,6 +871,7 @@ function renderReports(){
     ["pending","Pending Fees"],
     ["payments","Payment History"],
     ["admissions","Admission History"],
+    ["readmission","Re-admission Tracker"],
   ];
   let body = "";
   const list = state.students;
@@ -922,6 +951,23 @@ function renderReports(){
     body = `<div class="panel"><div class="panel-head"><h3>Admission History (${rows.length})</h3></div>
       <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Admission Date</th></tr></thead>
       <tbody>${rows.length? rows.map(s=>`<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${fmtDate(s.admissionDate)}</td></tr>`).join("") : `<tr class="empty-row"><td colspan="4">No admissions yet.</td></tr>`}</tbody></table>
+    </div>`;
+  }
+  else if(state.reportTab==="readmission"){
+    const rows = list.filter(s=>s.class==="11").sort((a,b)=>a.name.localeCompare(b.name));
+    body = `<div class="panel"><div class="panel-head"><h3>Class 11 → Class 12 Re-admission Tracker (${rows.length})</h3></div>
+      <div class="hint" style="margin-bottom:10px;">Shows current Class 11 students and whether they've re-admitted for Class 12 next session. Update the status here as it changes.</div>
+      <table><thead><tr><th>Admission ID</th><th>Name</th><th>Stream</th><th>Mobile</th><th>Status</th></tr></thead>
+      <tbody>${rows.length? rows.map(s=>{
+        const current = s.reAdmissionStatus || "pending";
+        return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td><span class="tag">${streamsLabel(s)}</span></td><td>${escapeHtml(s.mobile)}</td><td>
+          <select class="input" data-readmit-status="${s.id}" style="padding:5px 8px; font-size:12.5px;">
+            <option value="pending" ${current==="pending"?"selected":""}>Pending</option>
+            <option value="readmitted" ${current==="readmitted"?"selected":""}>Re-admitted</option>
+            <option value="left" ${current==="left"?"selected":""}>Not Continuing</option>
+          </select>
+        </td></tr>`;
+      }).join("") : `<tr class="empty-row"><td colspan="5">No Class 11 students on record.</td></tr>`}</tbody></table>
     </div>`;
   }
 
@@ -1031,6 +1077,12 @@ function attachContentHandlers(){
         .catch(err=> showToast("Could not save: " + err.message));
     });
   }
+  document.querySelectorAll("[data-readmit-status]").forEach(el=>{
+    el.addEventListener("change", ()=>{
+      updateStudentDoc(el.dataset.readmitStatus, { reAdmissionStatus: el.value });
+      showToast("Re-admission status updated.");
+    });
+  });
 }
 
 // re-render only the list-bearing content without losing input focus while typing search
@@ -1128,6 +1180,16 @@ function openStudentForm(studentId){
           <input class="input" type="date" name="admissionDate" value="${editing?s.admissionDate:todayStr()}" required/>
           <div class="err" data-err="admissionDate"></div>
         </div>
+        ${editing? `
+        <div class="field">
+          <label>Re-admission Status (for next session)</label>
+          <select class="input" name="reAdmissionStatus">
+            <option value="na" ${(s.reAdmissionStatus||(s.class==="11"?"pending":"na"))==="na"?"selected":""}>Not Applicable</option>
+            <option value="pending" ${(s.reAdmissionStatus||(s.class==="11"?"pending":"na"))==="pending"?"selected":""}>Pending</option>
+            <option value="readmitted" ${(s.reAdmissionStatus||(s.class==="11"?"pending":"na"))==="readmitted"?"selected":""}>Re-admitted</option>
+            <option value="left" ${(s.reAdmissionStatus||(s.class==="11"?"pending":"na"))==="left"?"selected":""}>Not Continuing</option>
+          </select>
+        </div>` : ""}
         <div class="field">
           <label>Class *</label>
           <select class="input" name="class" id="classSelect" required>
@@ -1291,6 +1353,7 @@ function openStudentForm(studentId){
         streams: selectedStreams,
         totalFee: Number(data.totalFee),
         discount: Number(data.discount||0),
+        reAdmissionStatus: data.reAdmissionStatus || "na",
         previousSchool: (data.previousSchool||"").trim(),
         remarks: (data.remarks||"").trim(),
         village: (data.village||"").trim(),
@@ -1437,6 +1500,7 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Last Payment</div><div class="v">${fmtDate(d.lastPaymentDate)}</div></div>
       <div class="kv"><div class="k">Class 10 School / Coaching</div><div class="v">${s.previousSchool? escapeHtml(s.previousSchool) : "—"}</div></div>
       <div class="kv"><div class="k">Remarks</div><div class="v">${s.remarks? escapeHtml(s.remarks) : "—"}</div></div>
+      <div class="kv"><div class="k">Re-admission Status</div><div class="v">${readmissionBadge(s.reAdmissionStatus||(s.class==="11"?"pending":"na"))}</div></div>
     </div>
 
     <div class="divider"></div>
@@ -1456,6 +1520,31 @@ function openProfile(studentId){
 
     <div class="divider"></div>
     <div class="panel-head" style="margin-bottom:10px;">
+      <h3 style="font-size:14.5px;">Installment Plan</h3>
+    </div>
+    <div class="hint" style="margin-bottom:10px;">Optional — lay out a due-date schedule if fee will come in parts. Status is worked out automatically by comparing total paid so far against each due amount.</div>
+    <table>
+      <thead><tr><th>Due Date</th><th>Amount</th><th>Status</th><th class="no-print">Remove</th></tr></thead>
+      <tbody>
+        ${(()=>{ const insts = installmentStatuses(s); return insts.length ? insts.map(inst=>
+          `<tr><td>${fmtDate(inst.date)}</td><td>${fmtMoney(inst.amount)}</td><td>${installmentBadge(inst.status)}</td><td class="no-print"><button class="btn btn-danger btn-sm" data-remove-installment="${inst.idx}">Remove</button></td></tr>`
+        ).join("") : `<tr class="empty-row"><td colspan="4">No installment plan set — fee is tracked as one lump sum.</td></tr>`; })()}
+      </tbody>
+    </table>
+    <form id="addInstallmentForm" class="no-print" style="display:flex; gap:8px; align-items:flex-end; margin-top:12px; flex-wrap:wrap;">
+      <div class="field" style="flex:1; min-width:140px;">
+        <label>Due Date</label>
+        <input class="input" type="date" name="instDate" required/>
+      </div>
+      <div class="field" style="flex:1; min-width:120px;">
+        <label>Amount (₹)</label>
+        <input class="input" type="number" min="1" step="1" name="instAmount" required/>
+      </div>
+      <button type="submit" class="btn btn-ghost btn-sm">Add Installment</button>
+    </form>
+
+    <div class="divider"></div>
+    <div class="panel-head" style="margin-bottom:10px;">
       <h3 style="font-size:14.5px;">Payment History</h3>
       <button class="btn btn-primary btn-sm no-print" id="btnAddPaymentProfile" ${d.due<=0?"disabled":""}>Add Payment</button>
     </div>
@@ -1470,6 +1559,7 @@ function openProfile(studentId){
     </table>
 
     <div class="form-actions">
+      <button class="btn btn-ghost" id="btnIdCard">ID Card</button>
       <button class="btn btn-ghost" id="btnEditProfile">Edit Details</button>
       <button class="btn btn-danger" id="btnDeleteProfile">Delete Student</button>
     </div>
@@ -1479,9 +1569,74 @@ function openProfile(studentId){
   document.getElementById("btnAddPaymentProfile").addEventListener("click", ()=>{ closeOverlay(); openPaymentForm(s.id); });
   document.getElementById("btnEditProfile").addEventListener("click", ()=>{ closeOverlay(); openStudentForm(s.id); });
   document.getElementById("btnDeleteProfile").addEventListener("click", ()=>{ closeOverlay(); confirmDelete(s.id); });
+  document.getElementById("btnIdCard").addEventListener("click", ()=> openIdCard(s.id));
   document.querySelectorAll("[data-receipt]").forEach(el=>{
     el.addEventListener("click", ()=> openReceipt(el.dataset.receipt, Number(el.dataset.paymentIndex)));
   });
+  document.querySelectorAll("[data-remove-installment]").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      const idx = Number(el.dataset.removeInstallment);
+      const newInsts = (s.installments||[]).filter((_,i)=> i!==idx);
+      updateStudentDoc(s.id, { installments: newInsts });
+      showToast("Installment removed.");
+      closeOverlay();
+    });
+  });
+  document.getElementById("addInstallmentForm").addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const amt = Number(f.get("instAmount"));
+    const date = f.get("instDate");
+    if(!date || !amt || amt<=0) return;
+    const newInsts = [...(s.installments||[]), {date, amount:amt}];
+    updateStudentDoc(s.id, { installments: newInsts });
+    showToast("Installment added.");
+    closeOverlay();
+  });
+}
+
+/* =========================================================
+   STUDENT ID CARD
+   ========================================================= */
+function openIdCard(studentId){
+  const s = state.students.find(x=>x.id===studentId);
+  if(!s) return;
+  const html = `
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-head no-print">
+      <h2>Student ID Card</h2>
+      <button class="modal-close" id="closeModal">&times;</button>
+    </div>
+    <div id="receiptPrintArea" style="border:1px solid var(--line); border-radius:14px; padding:20px; background:linear-gradient(160deg, #fff, #F7FAFD);">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; padding-bottom:12px; border-bottom:2px solid var(--navy);">
+        <img src="${LOGO_SRC}" alt="logo" style="width:40px; height:40px; border-radius:8px; object-fit:cover;"/>
+        <div>
+          <div style="font-family:'Fraunces',serif; font-weight:700; font-size:15px; color:var(--navy);">${escapeHtml(state.settings.instituteName)}</div>
+          <div class="hint">Student Identity Card</div>
+        </div>
+      </div>
+      <div style="text-align:center; margin-bottom:14px;">
+        <div style="width:76px; height:76px; border-radius:50%; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:center; font-family:'Fraunces',serif; font-size:26px; font-weight:700; margin:0 auto 10px auto;">
+          ${escapeHtml((s.name||"?").trim().charAt(0).toUpperCase())}
+        </div>
+        <div style="font-family:'Fraunces',serif; font-weight:700; font-size:17px;">${escapeHtml(s.name)}</div>
+        <div class="hint">Class ${s.class} · ${streamsLabel(s)}</div>
+      </div>
+      <div class="kv-grid" style="margin:0;">
+        <div class="kv"><div class="k">Admission ID</div><div class="v">${s.id}</div></div>
+        <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch / Session</div><div class="v">${admissionYear(s)}</div></div>
+        <div class="kv"><div class="k">Guardian Contact</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
+      </div>
+      <div class="hint" style="text-align:center; margin-top:16px; padding-top:12px; border-top:1px solid var(--line);">Valid for the ${admissionYear(s)} academic session</div>
+    </div>
+    <div class="form-actions no-print">
+      <button type="button" class="btn btn-ghost" id="cancelModal">Close</button>
+      <button type="button" class="btn btn-primary" id="btnPrintReceipt">Print / Save PDF</button>
+    </div>
+  </div>`;
+  openOverlay(html);
+  wireReceiptModal();
 }
 
 /* =========================================================
@@ -1637,4 +1792,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.1.0 — added Fee Settings (fixed default fee per Class+Stream, auto-fill on admission, editable) -->
+<!-- VERSION 4.2.0 — added flexible Installment Plan, printable Student ID Card, Re-admission Tracker -->
