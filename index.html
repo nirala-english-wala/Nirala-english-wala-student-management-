@@ -232,7 +232,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.2.1";
+const APP_VERSION = "4.3.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -494,6 +494,16 @@ function buildReminderLink(s){
   const d = computeDerived(s);
   const guardianLabel = s.fatherName || s.guardianName || s.motherName || "Guardian";
   const msg = `Dear ${guardianLabel}, a fee payment of ${fmtMoney(d.due)} is due for ${s.name} (Class ${s.class} - ${streamsLabel(s)}) at ${state.settings.instituteName}. Kindly clear the due amount at the earliest. Thank you.`;
+  const phone = String(s.guardianWhatsapp || s.guardianMobile || "").replace(/\D/g,"");
+  return `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
+}
+
+function buildPaymentConfirmationLink(s, payment, cumulativePaid, netFee){
+  const guardianLabel = s.fatherName || s.guardianName || s.motherName || "Guardian";
+  const balance = Math.max(0, netFee - cumulativePaid);
+  const msg = balance>0
+    ? `Dear ${guardianLabel}, we have received a fee payment of ${fmtMoney(payment.amount)} for ${s.name} (Class ${s.class} - ${streamsLabel(s)}) at ${state.settings.instituteName} on ${fmtDate(payment.date)}. Remaining balance: ${fmtMoney(balance)}. Thank you.`
+    : `Dear ${guardianLabel}, we have received a fee payment of ${fmtMoney(payment.amount)} for ${s.name} (Class ${s.class} - ${streamsLabel(s)}) at ${state.settings.instituteName} on ${fmtDate(payment.date)}. The full fee has now been paid. Thank you.`;
   const phone = String(s.guardianWhatsapp || s.guardianMobile || "").replace(/\D/g,"");
   return `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
 }
@@ -832,7 +842,7 @@ function renderFees(){
   <div class="panel">
     <div class="panel-head"><h3>Fee Status (${list.length})</h3></div>
     <table>
-      <thead><tr><th>Admission ID</th><th>Name</th><th>Class / Stream</th><th>Fee</th><th>Paid</th><th>Due</th><th>Overdue</th><th>Status</th><th>Last Payment</th><th class="no-print">Action</th></tr></thead>
+      <thead><tr><th>Admission ID</th><th>Name</th><th>Class / Stream</th><th>Fee</th><th>Paid</th><th>Due</th><th>Overdue</th><th>Status</th><th>Last Payment</th><th>Last Reminded</th><th class="no-print">Action</th></tr></thead>
       <tbody>
         ${list.length ? list.map(s=>{
           const d = computeDerived(s);
@@ -847,6 +857,7 @@ function renderFees(){
             <td>${days>0? `${days}d` : "—"}</td>
             <td>${statusBadge(d.status)}</td>
             <td>${fmtDate(d.lastPaymentDate)}</td>
+            <td>${s.lastRemindedDate? fmtDate(s.lastRemindedDate) : "—"}</td>
             <td class="no-print">
               <div class="row-actions">
                 <button class="btn btn-primary btn-sm" data-pay="${s.id}" ${d.due<=0?"disabled":""}>Add Payment</button>
@@ -854,7 +865,7 @@ function renderFees(){
               </div>
             </td>
           </tr>`;
-        }).join("") : `<tr class="empty-row"><td colspan="10">No students match the current filters.</td></tr>`}
+        }).join("") : `<tr class="empty-row"><td colspan="11">No students match the current filters.</td></tr>`}
       </tbody>
     </table>
   </div>
@@ -935,8 +946,8 @@ function renderReports(){
   else if(state.reportTab==="pending"){
     const rows = list.filter(s=>computeDerived(s).due>0).sort((a,b)=>daysOverdue(b)-daysOverdue(a));
     body = `<div class="panel"><div class="panel-head"><h3>Pending Fee List (${rows.length})</h3></div>
-      <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Mobile</th><th>Fee</th><th>Paid</th><th>Due</th><th>Days Overdue</th><th class="no-print">Action</th></tr></thead>
-      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); const days=daysOverdue(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td>${days>0? `<span class="badge badge-due"><span class="badge-dot"></span>${days} day${days===1?"":"s"}</span>` : "—"}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!(s.guardianWhatsapp||s.guardianMobile)?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="9">No pending dues. All fees collected.</td></tr>`}</tbody></table>
+      <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Mobile</th><th>Fee</th><th>Paid</th><th>Due</th><th>Days Overdue</th><th>Last Reminded</th><th class="no-print">Action</th></tr></thead>
+      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); const days=daysOverdue(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td>${days>0? `<span class="badge badge-due"><span class="badge-dot"></span>${days} day${days===1?"":"s"}</span>` : "—"}</td><td>${s.lastRemindedDate? fmtDate(s.lastRemindedDate) : "—"}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!(s.guardianWhatsapp||s.guardianMobile)?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="10">No pending dues. All fees collected.</td></tr>`}</tbody></table>
     </div>`;
   }
   else if(state.reportTab==="payments"){
@@ -1049,6 +1060,7 @@ function attachContentHandlers(){
       const st = state.students.find(x=>x.id===el.dataset.remind);
       if(!st) return;
       window.open(buildReminderLink(st), "_blank");
+      updateStudentDoc(st.id, { lastRemindedDate: todayStr() });
     });
   });
   const quickAdmit = document.getElementById("btnQuickAdmit");
@@ -1455,8 +1467,11 @@ function openPaymentForm(studentId){
     const newIndex = newPayments.length - 1;
     const cumulativePaid = d.paid + amt;
     const receiptNo = `${s.id}-R${String(newIndex+1).padStart(2,"0")}`;
-    openOverlay(renderReceiptModal(s, {date:data.date, amount:amt}, cumulativePaid, d.netFee, receiptNo));
+    const newPayment = {date:data.date, amount:amt};
+    openOverlay(renderReceiptModal(s, newPayment, cumulativePaid, d.netFee, receiptNo));
     wireReceiptModal();
+    const confirmBtn = document.getElementById("btnSendConfirmation");
+    if(confirmBtn) confirmBtn.addEventListener("click", ()=> window.open(buildPaymentConfirmationLink(s, newPayment, cumulativePaid, d.netFee), "_blank"));
   });
 }
 
@@ -1500,6 +1515,7 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Amount Paid</div><div class="v">${fmtMoney(d.paid)}</div></div>
       <div class="kv"><div class="k">Due Amount</div><div class="v">${fmtMoney(d.due)}</div></div>
       <div class="kv"><div class="k">Last Payment</div><div class="v">${fmtDate(d.lastPaymentDate)}</div></div>
+      <div class="kv"><div class="k">Last Reminded</div><div class="v">${s.lastRemindedDate? fmtDate(s.lastRemindedDate) : "—"}</div></div>
       <div class="kv"><div class="k">Class 10 School / Coaching</div><div class="v">${s.previousSchool? escapeHtml(s.previousSchool) : "—"}</div></div>
       <div class="kv"><div class="k">Remarks</div><div class="v">${s.remarks? escapeHtml(s.remarks) : "—"}</div></div>
       <div class="kv"><div class="k">Re-admission Status</div><div class="v">${readmissionBadge(s.reAdmissionStatus||(s.class==="11"?"pending":"na"))}</div></div>
@@ -1680,8 +1696,9 @@ function renderReceiptModal(s, payment, cumulativePaid, netFee, receiptNo){
       </table>
       <div class="hint" style="text-align:center;">Thank you for your payment.</div>
     </div>
-    <div class="form-actions no-print">
+    <div class="form-actions no-print" style="flex-wrap:wrap;">
       <button type="button" class="btn btn-ghost" id="cancelModal">Close</button>
+      <button type="button" class="btn btn-ghost" id="btnSendConfirmation" ${!(s.guardianWhatsapp||s.guardianMobile)?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Send Confirmation (WhatsApp)</button>
       <button type="button" class="btn btn-primary" id="btnPrintReceipt">Print / Save PDF</button>
     </div>
   </div>`;
@@ -1706,6 +1723,8 @@ function openReceipt(studentId, paymentIndex){
   const receiptNo = `${s.id}-R${String(paymentIndex+1).padStart(2,"0")}`;
   openOverlay(renderReceiptModal(s, payment, cumulativePaid, d.netFee, receiptNo));
   wireReceiptModal();
+  const confirmBtn = document.getElementById("btnSendConfirmation");
+  if(confirmBtn) confirmBtn.addEventListener("click", ()=> window.open(buildPaymentConfirmationLink(s, payment, cumulativePaid, d.netFee), "_blank"));
 }
 window.addEventListener("afterprint", ()=>{ document.body.classList.remove("receipt-mode"); });
 
@@ -1794,4 +1813,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.2.1 — reduced sidebar/header jitter on mobile "Desktop site" zoom -->
+<!-- VERSION 4.3.0 — added Last Reminded date tracking, WhatsApp payment confirmation to guardians -->
