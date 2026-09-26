@@ -232,7 +232,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.3.0";
+const APP_VERSION = "4.4.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -313,6 +313,7 @@ let state = {
   filterClass: "",
   filterStream: "",
   filterYear: "",
+  filterStatus: "",
   reportTab: "classwise",
   sidebarOpen: false,
 };
@@ -532,6 +533,7 @@ function filteredStudents(){
   if(state.filterClass) list = list.filter(s=>s.class===state.filterClass);
   if(state.filterStream) list = list.filter(s=>getStreams(s).includes(state.filterStream));
   if(state.filterYear) list = list.filter(s=>admissionYear(s)===state.filterYear);
+  if(state.filterStatus) list = list.filter(s=>computeDerived(s).status===state.filterStatus);
   if(state.search.trim()){
     const q = state.search.trim().toLowerCase();
     list = list.filter(s =>
@@ -641,6 +643,42 @@ function render(){
 /* =========================================================
    DASHBOARD
    ========================================================= */
+function monthlyCollectionData(){
+  const map = {};
+  state.students.forEach(s=> (s.payments||[]).forEach(p=>{
+    const d = new Date(p.date);
+    if(isNaN(d)) return;
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    map[key] = (map[key]||0) + Number(p.amount||0);
+  }));
+  const now = new Date();
+  const result = [];
+  for(let i=5;i>=0;i--){
+    const dt = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const key = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`;
+    result.push({ key, label: dt.toLocaleDateString("en-IN",{month:"short"}), amount: map[key]||0 });
+  }
+  return result;
+}
+function renderMonthlyChart(){
+  const data = monthlyCollectionData();
+  const max = Math.max(1, ...data.map(d=>d.amount));
+  return `
+  <div class="panel">
+    <div class="panel-head"><h3>Monthly Collection (Last 6 Months)</h3></div>
+    <div style="display:flex; align-items:flex-end; gap:14px; height:170px; padding:10px 4px 0 4px;">
+      ${data.map(d=>{
+        const h = Math.round((d.amount/max)*130);
+        return `<div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;">
+          <div style="font-size:11px; color:var(--muted); margin-bottom:4px; white-space:nowrap;">${d.amount>0? fmtMoney(d.amount) : ""}</div>
+          <div style="width:100%; max-width:38px; height:${Math.max(h,2)}px; background:${d.amount>0?'var(--gold)':'var(--line-soft)'}; border-radius:5px 5px 0 0;"></div>
+          <div style="font-size:12px; color:var(--muted); margin-top:6px; font-weight:600;">${d.label}</div>
+        </div>`;
+      }).join("")}
+    </div>
+  </div>
+  `;
+}
 function renderDashboard(){
   const list = state.students;
   const totalStudents = list.length;
@@ -674,6 +712,8 @@ function renderDashboard(){
     <div class="stat-card accent-success"><div class="label">Total Collected</div><div class="value">${fmtMoney(totalCollected)}</div></div>
     <div class="stat-card accent-danger"><div class="label">Total Pending / Due</div><div class="value">${fmtMoney(totalDue)}</div></div>
   </div>
+
+  ${renderMonthlyChart()}
 
   <div class="panel">
     <div class="panel-head"><h3>Class &amp; Stream Overview</h3></div>
@@ -735,6 +775,12 @@ function renderFilterBar(){
       <select class="input" id="filterYear">
         <option value="">All Batches</option>
         ${availableYears().map(y=>`<option value="${y}" ${state.filterYear===y?"selected":""}>Admitted ${y}</option>`).join("")}
+      </select>
+      <select class="input" id="filterStatus">
+        <option value="">All Fee Status</option>
+        <option value="due" ${state.filterStatus==="due"?"selected":""}>Only Due</option>
+        <option value="partial" ${state.filterStatus==="partial"?"selected":""}>Only Partial</option>
+        <option value="paid" ${state.filterStatus==="paid"?"selected":""}>Only Paid</option>
       </select>
     </div>
   </div>`;
@@ -862,6 +908,7 @@ function renderFees(){
               <div class="row-actions">
                 <button class="btn btn-primary btn-sm" data-pay="${s.id}" ${d.due<=0?"disabled":""}>Add Payment</button>
                 <button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${(d.due<=0||!(s.guardianWhatsapp||s.guardianMobile))?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button>
+                <a class="btn btn-ghost btn-sm" href="tel:+91${String(s.guardianMobile||s.guardianWhatsapp||"").replace(/\D/g,"")}" ${!(s.guardianMobile||s.guardianWhatsapp)?'style="pointer-events:none; opacity:0.5;"':''} title="${(s.guardianMobile||s.guardianWhatsapp)? "":"Add guardian's mobile number first"}">Call</a>
               </div>
             </td>
           </tr>`;
@@ -947,7 +994,7 @@ function renderReports(){
     const rows = list.filter(s=>computeDerived(s).due>0).sort((a,b)=>daysOverdue(b)-daysOverdue(a));
     body = `<div class="panel"><div class="panel-head"><h3>Pending Fee List (${rows.length})</h3></div>
       <table><thead><tr><th>Admission ID</th><th>Name</th><th>Class/Stream</th><th>Mobile</th><th>Fee</th><th>Paid</th><th>Due</th><th>Days Overdue</th><th>Last Reminded</th><th class="no-print">Action</th></tr></thead>
-      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); const days=daysOverdue(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td>${days>0? `<span class="badge badge-due"><span class="badge-dot"></span>${days} day${days===1?"":"s"}</span>` : "—"}</td><td>${s.lastRemindedDate? fmtDate(s.lastRemindedDate) : "—"}</td><td class="no-print"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!(s.guardianWhatsapp||s.guardianMobile)?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="10">No pending dues. All fees collected.</td></tr>`}</tbody></table>
+      <tbody>${rows.length? rows.map(s=>{const d=computeDerived(s); const days=daysOverdue(s); return `<tr><td class="cell-muted">${s.id}</td><td class="cell-strong">${escapeHtml(s.name)}</td><td>Class ${s.class} · ${streamsLabel(s)}</td><td>${escapeHtml(s.mobile)}</td><td>${fmtMoney(s.totalFee)}</td><td>${fmtMoney(d.paid)}</td><td>${fmtMoney(d.due)}</td><td>${days>0? `<span class="badge badge-due"><span class="badge-dot"></span>${days} day${days===1?"":"s"}</span>` : "—"}</td><td>${s.lastRemindedDate? fmtDate(s.lastRemindedDate) : "—"}</td><td class="no-print"><div class="row-actions"><button class="btn btn-ghost btn-sm" data-remind="${s.id}" ${!(s.guardianWhatsapp||s.guardianMobile)?"disabled":""} title="${(s.guardianWhatsapp||s.guardianMobile)? "":"Add guardian's WhatsApp number first"}">Remind</button><a class="btn btn-ghost btn-sm" href="tel:+91${String(s.guardianMobile||s.guardianWhatsapp||"").replace(/\D/g,"")}" ${!(s.guardianMobile||s.guardianWhatsapp)?'style="pointer-events:none; opacity:0.5;"':''}>Call</a></div></td></tr>`;}).join("") : `<tr class="empty-row"><td colspan="10">No pending dues. All fees collected.</td></tr>`}</tbody></table>
     </div>`;
   }
   else if(state.reportTab==="payments"){
@@ -1042,6 +1089,8 @@ function attachContentHandlers(){
   if(fs) fs.addEventListener("change", e=>{ state.filterStream = e.target.value; render(); });
   const fy = document.getElementById("filterYear");
   if(fy) fy.addEventListener("change", e=>{ state.filterYear = e.target.value; render(); });
+  const fst = document.getElementById("filterStatus");
+  if(fst) fst.addEventListener("change", e=>{ state.filterStatus = e.target.value; render(); });
 
   document.querySelectorAll("[data-view]").forEach(el=>{
     el.addEventListener("click", ()=> openProfile(el.dataset.view));
@@ -1813,4 +1862,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.3.0 — added Last Reminded date tracking, WhatsApp payment confirmation to guardians -->
+<!-- VERSION 4.4.0 — added Call button, Monthly Collection chart, Fee status filter (Due/Partial/Paid) -->
