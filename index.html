@@ -232,7 +232,7 @@ const STREAMS = ["English","Arts","Hindi"];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.4.0";
+const APP_VERSION = "4.5.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -1627,6 +1627,7 @@ function openProfile(studentId){
 
     <div class="form-actions">
       <button class="btn btn-ghost" id="btnIdCard">ID Card</button>
+      <button class="btn btn-ghost" id="btnFullPrint">Print Full Details</button>
       <button class="btn btn-ghost" id="btnEditProfile">Edit Details</button>
       <button class="btn btn-danger" id="btnDeleteProfile">Delete Student</button>
     </div>
@@ -1637,6 +1638,7 @@ function openProfile(studentId){
   document.getElementById("btnEditProfile").addEventListener("click", ()=>{ closeOverlay(); openStudentForm(s.id); });
   document.getElementById("btnDeleteProfile").addEventListener("click", ()=>{ closeOverlay(); confirmDelete(s.id); });
   document.getElementById("btnIdCard").addEventListener("click", ()=> openIdCard(s.id));
+  document.getElementById("btnFullPrint").addEventListener("click", ()=> openFullProfilePrint(s.id));
   document.querySelectorAll("[data-receipt]").forEach(el=>{
     el.addEventListener("click", ()=> openReceipt(el.dataset.receipt, Number(el.dataset.paymentIndex)));
   });
@@ -1660,6 +1662,101 @@ function openProfile(studentId){
     showToast("Installment added.");
     closeOverlay();
   });
+}
+
+/* =========================================================
+   FULL STUDENT PROFILE PRINTOUT
+   ========================================================= */
+function openFullProfilePrint(studentId){
+  const s = state.students.find(x=>x.id===studentId);
+  if(!s) return;
+  const d = computeDerived(s);
+  const paymentsSorted = (s.payments||[]).slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const insts = installmentStatuses(s);
+  const html = `
+  <div class="modal wide">
+    <div class="modal-head no-print">
+      <h2>Full Student Details</h2>
+      <button class="modal-close" id="closeModal">&times;</button>
+    </div>
+    <div id="receiptPrintArea" style="border:1px solid var(--line); border-radius:12px; padding:24px;">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; padding-bottom:14px; border-bottom:2px solid var(--navy);">
+        <img src="${LOGO_SRC}" alt="logo" style="width:44px; height:44px; border-radius:8px; object-fit:cover;"/>
+        <div>
+          <div style="font-family:'Fraunces',serif; font-weight:700; font-size:17px; color:var(--navy);">${escapeHtml(state.settings.instituteName)}</div>
+          <div class="hint">Complete Student Record</div>
+        </div>
+      </div>
+
+      <div class="profile-top" style="margin-bottom:6px;">
+        <div>
+          <div class="profile-name">${escapeHtml(s.name)}</div>
+          <div class="profile-id">${s.id}${s.rollNumber? " · Roll No. "+escapeHtml(s.rollNumber) : ""} · Class ${s.class} · ${streamsLabel(s)}</div>
+        </div>
+        <div>${statusBadge(d.status)}</div>
+      </div>
+
+      <div class="divider"></div>
+      <h3 style="font-size:14px; margin:0 0 8px 0;">Personal &amp; Guardian Details</h3>
+      <div class="kv-grid" style="margin:0 0 14px 0;">
+        <div class="kv"><div class="k">Father's Name</div><div class="v">${escapeHtml(s.fatherName || s.guardianName || "—")}</div></div>
+        <div class="kv"><div class="k">Mother's Name</div><div class="v">${s.motherName? escapeHtml(s.motherName) : "—"}</div></div>
+        <div class="kv"><div class="k">Father's Occupation</div><div class="v">${s.fatherOccupation? escapeHtml(s.fatherOccupation) : "—"}</div></div>
+        <div class="kv"><div class="k">Student's Mobile</div><div class="v">${escapeHtml(s.mobile)}</div></div>
+        <div class="kv"><div class="k">Student's WhatsApp</div><div class="v">${s.studentWhatsapp? escapeHtml(s.studentWhatsapp) : "—"}</div></div>
+        <div class="kv"><div class="k">Guardian's Mobile</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
+        <div class="kv"><div class="k">Guardian's WhatsApp</div><div class="v">${s.guardianWhatsapp? escapeHtml(s.guardianWhatsapp) : "—"}</div></div>
+        <div class="kv"><div class="k">Class 10 School/Coaching</div><div class="v">${s.previousSchool? escapeHtml(s.previousSchool) : "—"}</div></div>
+      </div>
+
+      <h3 style="font-size:14px; margin:0 0 8px 0;">Address</h3>
+      <div class="kv-grid" style="margin:0 0 14px 0;">
+        <div class="kv"><div class="k">City / Village</div><div class="v">${s.village? escapeHtml(s.village) : "—"}</div></div>
+        <div class="kv"><div class="k">Ward No.</div><div class="v">${s.ward? escapeHtml(s.ward) : "—"}</div></div>
+        <div class="kv"><div class="k">Block</div><div class="v">${s.block? escapeHtml(s.block) : "—"}</div></div>
+        <div class="kv"><div class="k">Post</div><div class="v">${s.post? escapeHtml(s.post) : "—"}</div></div>
+        <div class="kv"><div class="k">District</div><div class="v">${s.district? escapeHtml(s.district) : "—"}</div></div>
+        <div class="kv"><div class="k">State</div><div class="v">${s.state? escapeHtml(s.state) : "—"}</div></div>
+        <div class="kv"><div class="k">Nationality</div><div class="v">${s.nationality? escapeHtml(s.nationality) : "—"}</div></div>
+      </div>
+
+      <h3 style="font-size:14px; margin:0 0 8px 0;">Admission &amp; Fee Summary</h3>
+      <div class="kv-grid" style="margin:0 0 14px 0;">
+        <div class="kv"><div class="k">Admission Date</div><div class="v">${fmtDate(s.admissionDate)}</div></div>
+        <div class="kv"><div class="k">Batch / Session</div><div class="v">${admissionYear(s)}</div></div>
+        <div class="kv"><div class="k">Total Course Fee</div><div class="v">${fmtMoney(s.totalFee)}</div></div>
+        <div class="kv"><div class="k">Discount / Scholarship</div><div class="v">${d.discount>0? fmtMoney(d.discount) : "—"}</div></div>
+        <div class="kv"><div class="k">Net Fee Payable</div><div class="v">${fmtMoney(d.netFee)}</div></div>
+        <div class="kv"><div class="k">Amount Paid</div><div class="v">${fmtMoney(d.paid)}</div></div>
+        <div class="kv"><div class="k">Due Amount</div><div class="v">${fmtMoney(d.due)}</div></div>
+        <div class="kv"><div class="k">Last Payment</div><div class="v">${fmtDate(d.lastPaymentDate)}</div></div>
+        <div class="kv"><div class="k">Re-admission Status</div><div class="v">${readmissionBadge(s.reAdmissionStatus||(s.class==="11"?"pending":"na"))}</div></div>
+      </div>
+
+      ${insts.length ? `
+      <h3 style="font-size:14px; margin:0 0 8px 0;">Installment Plan</h3>
+      <table style="margin-bottom:14px;">
+        <thead><tr><th>Due Date</th><th>Amount</th><th>Status</th></tr></thead>
+        <tbody>${insts.map(i=>`<tr><td>${fmtDate(i.date)}</td><td>${fmtMoney(i.amount)}</td><td>${installmentBadge(i.status)}</td></tr>`).join("")}</tbody>
+      </table>` : ""}
+
+      <h3 style="font-size:14px; margin:0 0 8px 0;">Payment History</h3>
+      <table style="margin-bottom:14px;">
+        <thead><tr><th>Date</th><th>Amount</th></tr></thead>
+        <tbody>${paymentsSorted.length? paymentsSorted.map(p=>`<tr><td>${fmtDate(p.date)}</td><td>${fmtMoney(p.amount)}</td></tr>`).join("") : `<tr class="empty-row"><td colspan="2">No payments recorded yet.</td></tr>`}</tbody>
+      </table>
+
+      ${s.remarks? `<h3 style="font-size:14px; margin:0 0 6px 0;">Remarks</h3><div class="hint" style="margin-bottom:6px;">${escapeHtml(s.remarks)}</div>` : ""}
+
+      <div class="hint" style="text-align:center; margin-top:10px; padding-top:12px; border-top:1px solid var(--line);">Printed on ${fmtDate(todayStr())}</div>
+    </div>
+    <div class="form-actions no-print">
+      <button type="button" class="btn btn-ghost" id="cancelModal">Close</button>
+      <button type="button" class="btn btn-primary" id="btnPrintReceipt">Print / Save PDF</button>
+    </div>
+  </div>`;
+  openOverlay(html);
+  wireReceiptModal();
 }
 
 /* =========================================================
@@ -1862,4 +1959,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.4.0 — added Call button, Monthly Collection chart, Fee status filter (Due/Partial/Paid) -->
+<!-- VERSION 4.5.0 — added Print Full Student Details (complete profile printout/PDF) -->
