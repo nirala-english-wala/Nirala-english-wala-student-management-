@@ -229,10 +229,25 @@
    ========================================================= */
 const CLASSES = ["11","12"];
 const STREAMS = ["English","Arts","Hindi"];
+const MAIN_STREAMS = ["Science","Commerce","Arts"];
+const SCIENCE_SUBJECTS = [
+  {label:"Physics", field:"coachingPhysics"},
+  {label:"Chemistry", field:"coachingChemistry"},
+  {label:"Mathematics", field:"coachingMathematics"},
+  {label:"Biology", field:"coachingBiology"},
+];
+const ARTS_SUBJECTS = [
+  {label:"History", field:"coachingHistory"},
+  {label:"Geography", field:"coachingGeography"},
+  {label:"Political Science", field:"coachingPoliticalScience"},
+  {label:"Psychology", field:"coachingPsychology"},
+  {label:"Home Science", field:"coachingHomeScience"},
+  {label:"Economics", field:"coachingEconomics"},
+];
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.5.0";
+const APP_VERSION = "4.6.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -1207,6 +1222,14 @@ function openStudentForm(studentId){
           <input class="input" name="rollNumber" value="${editing?escapeHtml(s.rollNumber||""):""}" placeholder="e.g. 21"/>
         </div>
         <div class="field">
+          <label>Date of Birth</label>
+          <input class="input" type="date" name="dateOfBirth" value="${editing?(s.dateOfBirth||""):""}"/>
+        </div>
+        <div class="field">
+          <label>Aadhaar Number</label>
+          <input class="input" name="aadhaarNumber" maxlength="12" value="${editing?escapeHtml(s.aadhaarNumber||""):""}" placeholder="12-digit number (optional)"/>
+        </div>
+        <div class="field">
           <label>Father's Name *</label>
           <input class="input" name="fatherName" value="${editing?escapeHtml(s.fatherName||s.guardianName||""):""}" required/>
           <div class="err" data-err="fatherName"></div>
@@ -1272,6 +1295,36 @@ function openStudentForm(studentId){
             }).join("")}
           </div>
           <div class="err" data-err="streams"></div>
+        </div>
+        <div class="field full" style="margin-top:6px; padding-top:10px; border-top:1px solid var(--line);">
+          <label style="font-size:13px;">Main Stream (optional)</label>
+        </div>
+        <div class="field">
+          <label>Main Stream</label>
+          <select class="input" name="mainStream" id="mainStreamSelect">
+            <option value="">Not set</option>
+            ${MAIN_STREAMS.map(ms=>`<option value="${ms}" ${editing&&s.mainStream===ms?"selected":""}>${ms}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field full" id="scienceSubjectsBlock" style="display:none;">
+          <label>Where the student takes coaching for each subject (optional)</label>
+          <div class="form-grid" style="margin-top:6px;">
+            ${SCIENCE_SUBJECTS.map(sub=>`
+              <div class="field">
+                <label style="font-weight:500;">${sub.label}</label>
+                <input class="input" name="${sub.field}" value="${editing?escapeHtml(s[sub.field]||""):""}" placeholder="Coaching/school name"/>
+              </div>`).join("")}
+          </div>
+        </div>
+        <div class="field full" id="artsSubjectsBlock" style="display:none;">
+          <label>Where the student takes coaching for each subject (optional)</label>
+          <div class="form-grid" style="margin-top:6px;">
+            ${ARTS_SUBJECTS.map(sub=>`
+              <div class="field">
+                <label style="font-weight:500;">${sub.label}</label>
+                <input class="input" name="${sub.field}" value="${editing?escapeHtml(s[sub.field]||""):""}" placeholder="Coaching/school name"/>
+              </div>`).join("")}
+          </div>
         </div>
         <div class="field">
           <label>Total Course Fee (₹) *</label>
@@ -1377,6 +1430,14 @@ function openStudentForm(studentId){
   });
   refreshFeeSuggestion();
 
+  function refreshMainStreamBlocks(){
+    const val = document.getElementById("mainStreamSelect").value;
+    document.getElementById("scienceSubjectsBlock").style.display = (val==="Science") ? "block" : "none";
+    document.getElementById("artsSubjectsBlock").style.display = (val==="Arts") ? "block" : "none";
+  }
+  document.getElementById("mainStreamSelect").addEventListener("change", refreshMainStreamBlocks);
+  refreshMainStreamBlocks();
+
   document.getElementById("studentForm").addEventListener("submit", (e)=>{
     e.preventDefault();
     const f = new FormData(e.target);
@@ -1411,6 +1472,10 @@ function openStudentForm(studentId){
         studentWhatsapp: (data.studentWhatsapp||"").trim(),
         guardianMobile: data.guardianMobile.trim(),
         guardianWhatsapp: data.guardianWhatsapp.trim(),
+        dateOfBirth: data.dateOfBirth || "",
+        aadhaarNumber: (data.aadhaarNumber||"").trim(),
+        mainStream: data.mainStream || "",
+        ...SCIENCE_SUBJECTS.concat(ARTS_SUBJECTS).reduce((acc,sub)=>{ acc[sub.field] = (data[sub.field]||"").trim(); return acc; }, {}),
         admissionDate: data.admissionDate,
         class: data.class,
         streams: selectedStreams,
@@ -1444,6 +1509,10 @@ function openStudentForm(studentId){
         studentWhatsapp: (data.studentWhatsapp||"").trim(),
         guardianMobile: data.guardianMobile.trim(),
         guardianWhatsapp: data.guardianWhatsapp.trim(),
+        dateOfBirth: data.dateOfBirth || "",
+        aadhaarNumber: (data.aadhaarNumber||"").trim(),
+        mainStream: data.mainStream || "",
+        ...SCIENCE_SUBJECTS.concat(ARTS_SUBJECTS).reduce((acc,sub)=>{ acc[sub.field] = (data[sub.field]||"").trim(); return acc; }, {}),
         class: data.class,
         streams: selectedStreams,
         admissionDate: data.admissionDate,
@@ -1550,6 +1619,8 @@ function openProfile(studentId){
 
     <div class="kv-grid">
       <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
+      <div class="kv"><div class="k">Date of Birth</div><div class="v">${s.dateOfBirth? fmtDate(s.dateOfBirth) : "—"}</div></div>
+      <div class="kv"><div class="k">Aadhaar Number</div><div class="v">${s.aadhaarNumber? escapeHtml(s.aadhaarNumber) : "—"}</div></div>
       <div class="kv"><div class="k">Father's Name</div><div class="v">${escapeHtml(s.fatherName || s.guardianName || "—")}</div></div>
       <div class="kv"><div class="k">Mother's Name</div><div class="v">${s.motherName? escapeHtml(s.motherName) : "—"}</div></div>
       <div class="kv"><div class="k">Father's Occupation</div><div class="v">${s.fatherOccupation? escapeHtml(s.fatherOccupation) : "—"}</div></div>
@@ -1557,6 +1628,7 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Student's WhatsApp Number</div><div class="v">${s.studentWhatsapp? escapeHtml(s.studentWhatsapp) : "—"}</div></div>
       <div class="kv"><div class="k">Guardian's Mobile Number</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
       <div class="kv"><div class="k">Guardian's WhatsApp Number</div><div class="v">${s.guardianWhatsapp? escapeHtml(s.guardianWhatsapp) : "—"}</div></div>
+      <div class="kv"><div class="k">Main Stream</div><div class="v">${s.mainStream? escapeHtml(s.mainStream) : "—"}</div></div>
       <div class="kv"><div class="k">Admission Date</div><div class="v">${fmtDate(s.admissionDate)}</div></div>
       <div class="kv"><div class="k">Total Course Fee</div><div class="v">${fmtMoney(s.totalFee)}</div></div>
       <div class="kv"><div class="k">Discount / Scholarship</div><div class="v">${d.discount>0? fmtMoney(d.discount) : "—"}</div></div>
@@ -1569,6 +1641,14 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Remarks</div><div class="v">${s.remarks? escapeHtml(s.remarks) : "—"}</div></div>
       <div class="kv"><div class="k">Re-admission Status</div><div class="v">${readmissionBadge(s.reAdmissionStatus||(s.class==="11"?"pending":"na"))}</div></div>
     </div>
+    ${(s.mainStream==="Science"||s.mainStream==="Arts") ? `
+    <div class="divider"></div>
+    <div class="panel-head" style="margin-bottom:10px;"><h3 style="font-size:14.5px;">Subject-wise Coaching (${s.mainStream})</h3></div>
+    <div class="kv-grid">
+      ${(s.mainStream==="Science"?SCIENCE_SUBJECTS:ARTS_SUBJECTS).map(sub=>
+        `<div class="kv"><div class="k">${sub.label}</div><div class="v">${s[sub.field]? escapeHtml(s[sub.field]) : "—"}</div></div>`
+      ).join("")}
+    </div>` : ""}
 
     <div class="divider"></div>
     <div class="panel-head" style="margin-bottom:10px;"><h3 style="font-size:14.5px;">Address</h3></div>
@@ -1699,6 +1779,8 @@ function openFullProfilePrint(studentId){
       <div class="divider"></div>
       <h3 style="font-size:14px; margin:0 0 8px 0;">Personal &amp; Guardian Details</h3>
       <div class="kv-grid" style="margin:0 0 14px 0;">
+        <div class="kv"><div class="k">Date of Birth</div><div class="v">${s.dateOfBirth? fmtDate(s.dateOfBirth) : "—"}</div></div>
+        <div class="kv"><div class="k">Aadhaar Number</div><div class="v">${s.aadhaarNumber? escapeHtml(s.aadhaarNumber) : "—"}</div></div>
         <div class="kv"><div class="k">Father's Name</div><div class="v">${escapeHtml(s.fatherName || s.guardianName || "—")}</div></div>
         <div class="kv"><div class="k">Mother's Name</div><div class="v">${s.motherName? escapeHtml(s.motherName) : "—"}</div></div>
         <div class="kv"><div class="k">Father's Occupation</div><div class="v">${s.fatherOccupation? escapeHtml(s.fatherOccupation) : "—"}</div></div>
@@ -1706,8 +1788,16 @@ function openFullProfilePrint(studentId){
         <div class="kv"><div class="k">Student's WhatsApp</div><div class="v">${s.studentWhatsapp? escapeHtml(s.studentWhatsapp) : "—"}</div></div>
         <div class="kv"><div class="k">Guardian's Mobile</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
         <div class="kv"><div class="k">Guardian's WhatsApp</div><div class="v">${s.guardianWhatsapp? escapeHtml(s.guardianWhatsapp) : "—"}</div></div>
+        <div class="kv"><div class="k">Main Stream</div><div class="v">${s.mainStream? escapeHtml(s.mainStream) : "—"}</div></div>
         <div class="kv"><div class="k">Class 10 School/Coaching</div><div class="v">${s.previousSchool? escapeHtml(s.previousSchool) : "—"}</div></div>
       </div>
+      ${(s.mainStream==="Science"||s.mainStream==="Arts") ? `
+      <h3 style="font-size:14px; margin:0 0 8px 0;">Subject-wise Coaching (${s.mainStream})</h3>
+      <div class="kv-grid" style="margin:0 0 14px 0;">
+        ${(s.mainStream==="Science"?SCIENCE_SUBJECTS:ARTS_SUBJECTS).map(sub=>
+          `<div class="kv"><div class="k">${sub.label}</div><div class="v">${s[sub.field]? escapeHtml(s[sub.field]) : "—"}</div></div>`
+        ).join("")}
+      </div>` : ""}
 
       <h3 style="font-size:14px; margin:0 0 8px 0;">Address</h3>
       <div class="kv-grid" style="margin:0 0 14px 0;">
@@ -1959,4 +2049,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.5.0 — added Print Full Student Details (complete profile printout/PDF) -->
+<!-- VERSION 4.6.0 — added DOB, Aadhaar Number, Main Stream (Science/Commerce/Arts) with subject-wise coaching location fields, all optional -->
