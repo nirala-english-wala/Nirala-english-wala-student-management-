@@ -247,7 +247,7 @@ const ARTS_SUBJECTS = [
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.7.0";
+const APP_VERSION = "4.8.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -320,6 +320,8 @@ const LOGO_SRC = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDAwM
 let state = {
   students: [],
   feeRates: {},
+  batches: [],
+  batchDraft: null,
   settings: { instituteName: "Nirala English Wala & Arts" },
   loaded: false,
   authChecked: false,
@@ -404,6 +406,18 @@ function attachFeeRatesListener(){
     state.feeRates = doc.exists ? (doc.data()||{}) : {};
     if(state.view==="feesettings") render();
   }, (err)=>{ showToast("Fee rates sync error: " + err.message); });
+}
+let unsubscribeBatches = null;
+function attachBatchesListener(){
+  if(unsubscribeBatches) return;
+  unsubscribeBatches = db.collection("settings").doc("batches").onSnapshot((doc)=>{
+    state.batches = doc.exists ? (doc.data().list||[]) : [];
+    if(state.view==="batchsettings" && state.batchDraft===null) render();
+  }, (err)=>{ showToast("Batch settings sync error: " + err.message); });
+}
+function getBatch(batchId){
+  if(!batchId) return null;
+  return (state.batches||[]).find(b=>b.id===batchId) || null;
 }
 function suggestedFee(cls, streamsArr){
   if(!cls || !streamsArr || !streamsArr.length) return 0;
@@ -572,6 +586,7 @@ const ICONS = {
   reports: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M9 12h6M9 16h6M9 8h3"/></svg>`,
   search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>`,
+  clock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>`,
   menu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>`,
 };
@@ -597,6 +612,7 @@ function render(){
     fees:"Fee Management",
     reports:"Reports",
     feesettings:"Fee Settings",
+    batchsettings:"Batch Settings",
   };
   app.innerHTML = `
     <div class="sidebar ${state.sidebarOpen?'open':''}" id="sidebar">
@@ -613,6 +629,7 @@ function render(){
       ${navItem("fees", ICONS.fees, "Fee Management")}
       ${navItem("reports", ICONS.reports, "Reports")}
       ${navItem("feesettings", ICONS.settings, "Fee Settings")}
+      ${navItem("batchsettings", ICONS.clock, "Batch Settings")}
       <div class="sidebar-foot">
         Classes tracked: 11 &amp; 12<br/>Streams: English &amp; Arts
         <div style="margin-top:10px; opacity:.8;">Ledger version ${APP_VERSION}</div>
@@ -636,7 +653,12 @@ function render(){
     </div>
   `;
   document.querySelectorAll("[data-nav]").forEach(el=>{
-    el.addEventListener("click", ()=>{ state.view = el.dataset.nav; state.sidebarOpen=false; render(); });
+    el.addEventListener("click", ()=>{
+      state.view = el.dataset.nav;
+      state.sidebarOpen=false;
+      if(state.view==="batchsettings") state.batchDraft = (state.batches||[]).map(b=>({...b}));
+      render();
+    });
   });
   document.getElementById("btnAddStudent").addEventListener("click", ()=> openStudentForm(null));
   const signOutLink = document.getElementById("signOutLink");
@@ -651,6 +673,7 @@ function render(){
   else if(state.view==="fees") content.innerHTML = renderFees();
   else if(state.view==="reports") content.innerHTML = renderReports();
   else if(state.view==="feesettings") content.innerHTML = renderFeeSettings();
+  else if(state.view==="batchsettings") content.innerHTML = renderBatchSettings();
 
   attachContentHandlers();
 }
@@ -1090,6 +1113,32 @@ function renderFeeSettings(){
   `;
 }
 
+function renderBatchSettings(){
+  if(state.batchDraft===null) state.batchDraft = (state.batches||[]).map(b=>({...b}));
+  const draft = state.batchDraft;
+  return `
+  <div class="panel">
+    <div class="panel-head"><h3>Batches</h3></div>
+    <div class="hint" style="margin-bottom:16px;">Create as many batches as you run (e.g. "1st Batch", "2nd Batch", "Morning Batch") with their timing. These will be selectable when admitting a student, and will show up on ID cards and receipts.</div>
+    <table>
+      <thead><tr><th>Batch Name</th><th>Timing</th><th class="no-print">Remove</th></tr></thead>
+      <tbody>
+        ${draft.length ? draft.map((b,idx)=>`
+          <tr>
+            <td><input class="input batchNameInput" data-idx="${idx}" value="${escapeHtml(b.name||"")}" placeholder="e.g. 1st Batch"/></td>
+            <td><input class="input batchTimeInput" data-idx="${idx}" value="${escapeHtml(b.time||"")}" placeholder="e.g. 7:00 AM - 9:00 AM"/></td>
+            <td class="no-print"><button type="button" class="btn btn-danger btn-sm" data-remove-batch-row="${idx}">Remove</button></td>
+          </tr>`).join("") : `<tr class="empty-row"><td colspan="3">No batches added yet.</td></tr>`}
+      </tbody>
+    </table>
+    <div class="form-actions" style="justify-content:flex-start;">
+      <button type="button" class="btn btn-ghost btn-sm" id="btnAddBatchRow">${ICONS.plus} Add Batch</button>
+      <button type="button" class="btn btn-primary" id="btnSaveBatches">Save Batches</button>
+    </div>
+  </div>
+  `;
+}
+
 /* =========================================================
    CONTENT INTERACTION HANDLERS
    ========================================================= */
@@ -1160,6 +1209,38 @@ function attachContentHandlers(){
       updateStudentDoc(el.dataset.readmitStatus, { reAdmissionStatus: el.value });
       showToast("Re-admission status updated.");
     });
+  });
+
+  function syncBatchDraftFromDOM(){
+    document.querySelectorAll(".batchNameInput").forEach(el=>{
+      const idx = Number(el.dataset.idx);
+      if(state.batchDraft[idx]) state.batchDraft[idx].name = el.value;
+    });
+    document.querySelectorAll(".batchTimeInput").forEach(el=>{
+      const idx = Number(el.dataset.idx);
+      if(state.batchDraft[idx]) state.batchDraft[idx].time = el.value;
+    });
+  }
+  const addBatchBtn = document.getElementById("btnAddBatchRow");
+  if(addBatchBtn) addBatchBtn.addEventListener("click", ()=>{
+    syncBatchDraftFromDOM();
+    state.batchDraft.push({ id: "b" + Date.now() + Math.floor(Math.random()*1000), name:"", time:"" });
+    render();
+  });
+  document.querySelectorAll("[data-remove-batch-row]").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      syncBatchDraftFromDOM();
+      state.batchDraft.splice(Number(el.dataset.removeBatchRow), 1);
+      render();
+    });
+  });
+  const saveBatchesBtn = document.getElementById("btnSaveBatches");
+  if(saveBatchesBtn) saveBatchesBtn.addEventListener("click", ()=>{
+    syncBatchDraftFromDOM();
+    const cleaned = state.batchDraft.filter(b=> b.name && b.name.trim());
+    db.collection("settings").doc("batches").set({ list: cleaned })
+      .then(()=>{ state.batches = cleaned; state.batchDraft = cleaned.map(b=>({...b})); showToast("Batches saved."); render(); })
+      .catch(err=> showToast("Could not save: " + err.message));
   });
 }
 
@@ -1305,6 +1386,14 @@ function openStudentForm(studentId){
             <option value="">Not set</option>
             ${MAIN_STREAMS.map(ms=>`<option value="${ms}" ${editing&&s.mainStream===ms?"selected":""}>${ms}</option>`).join("")}
           </select>
+        </div>
+        <div class="field">
+          <label>Batch</label>
+          <select class="input" name="batchId">
+            <option value="">Not set</option>
+            ${(state.batches||[]).map(b=>`<option value="${b.id}" ${editing&&s.batchId===b.id?"selected":""}>${escapeHtml(b.name)}${b.time? " — "+escapeHtml(b.time) : ""}</option>`).join("")}
+          </select>
+          ${(!state.batches || !state.batches.length) ? `<div class="hint">No batches set up yet — add them under "Batch Settings".</div>` : ""}
         </div>
         <div class="field full" id="scienceSubjectsBlock" style="display:none;">
           <label>Where the student takes coaching for each subject (optional)</label>
@@ -1475,6 +1564,7 @@ function openStudentForm(studentId){
         dateOfBirth: data.dateOfBirth || "",
         aadhaarNumber: (data.aadhaarNumber||"").trim(),
         mainStream: data.mainStream || "",
+        batchId: data.batchId || "",
         ...SCIENCE_SUBJECTS.concat(ARTS_SUBJECTS).reduce((acc,sub)=>{ acc[sub.field] = (data[sub.field]||"").trim(); return acc; }, {}),
         admissionDate: data.admissionDate,
         class: data.class,
@@ -1512,6 +1602,7 @@ function openStudentForm(studentId){
         dateOfBirth: data.dateOfBirth || "",
         aadhaarNumber: (data.aadhaarNumber||"").trim(),
         mainStream: data.mainStream || "",
+        batchId: data.batchId || "",
         ...SCIENCE_SUBJECTS.concat(ARTS_SUBJECTS).reduce((acc,sub)=>{ acc[sub.field] = (data[sub.field]||"").trim(); return acc; }, {}),
         class: data.class,
         streams: selectedStreams,
@@ -1629,6 +1720,8 @@ function openProfile(studentId){
       <div class="kv"><div class="k">Guardian's Mobile Number</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
       <div class="kv"><div class="k">Guardian's WhatsApp Number</div><div class="v">${s.guardianWhatsapp? escapeHtml(s.guardianWhatsapp) : "—"}</div></div>
       <div class="kv"><div class="k">Main Stream</div><div class="v">${s.mainStream? escapeHtml(s.mainStream) : "—"}</div></div>
+      <div class="kv"><div class="k">Batch</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).name) : "—"}</div></div>
+      <div class="kv"><div class="k">Batch Timing</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).time||"—") : "—"}</div></div>
       <div class="kv"><div class="k">Admission Date</div><div class="v">${fmtDate(s.admissionDate)}</div></div>
       <div class="kv"><div class="k">Total Course Fee</div><div class="v">${fmtMoney(s.totalFee)}</div></div>
       <div class="kv"><div class="k">Discount / Scholarship</div><div class="v">${d.discount>0? fmtMoney(d.discount) : "—"}</div></div>
@@ -1792,6 +1885,8 @@ function openFullProfilePrint(studentId){
         <div class="kv"><div class="k">Guardian's Mobile</div><div class="v">${s.guardianMobile? escapeHtml(s.guardianMobile) : "—"}</div></div>
         <div class="kv"><div class="k">Guardian's WhatsApp</div><div class="v">${s.guardianWhatsapp? escapeHtml(s.guardianWhatsapp) : "—"}</div></div>
         <div class="kv"><div class="k">Main Stream</div><div class="v">${s.mainStream? escapeHtml(s.mainStream) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).name) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch Timing</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).time||"—") : "—"}</div></div>
         <div class="kv"><div class="k">Class 10 School/Coaching</div><div class="v">${s.previousSchool? escapeHtml(s.previousSchool) : "—"}</div></div>
       </div>
       ${(s.mainStream==="Science"||s.mainStream==="Arts") ? `
@@ -1882,8 +1977,10 @@ function openIdCard(studentId){
       <div class="kv-grid" style="margin:0;">
         <div class="kv"><div class="k">Admission ID</div><div class="v">${s.id}</div></div>
         <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
-        <div class="kv"><div class="k">Batch / Session</div><div class="v">${admissionYear(s)}</div></div>
+        <div class="kv"><div class="k">Admission Year</div><div class="v">${admissionYear(s)}</div></div>
         <div class="kv"><div class="k">Date of Birth</div><div class="v">${s.dateOfBirth? fmtDate(s.dateOfBirth) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).name) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch Timing</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).time||"—") : "—"}</div></div>
       </div>
       <div class="hint" style="text-align:center; margin-top:16px; padding-top:12px; border-top:1px solid var(--line);">Valid for the ${admissionYear(s)} academic session</div>
     </div>
@@ -1924,6 +2021,8 @@ function renderReceiptModal(s, payment, cumulativePaid, netFee, receiptNo){
         <div class="kv"><div class="k">Admission ID</div><div class="v">${s.id}</div></div>
         <div class="kv"><div class="k">Class / Stream</div><div class="v">Class ${s.class} · ${streamsLabel(s)}</div></div>
         <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).name) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch Timing</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).time||"—") : "—"}</div></div>
       </div>
       <div class="divider"></div>
       <table style="margin-bottom:14px;">
@@ -1987,6 +2086,8 @@ function openFullPaymentSlip(studentId){
         <div class="kv"><div class="k">Admission ID</div><div class="v">${s.id}</div></div>
         <div class="kv"><div class="k">Class / Stream</div><div class="v">Class ${s.class} · ${streamsLabel(s)}</div></div>
         <div class="kv"><div class="k">Roll Number</div><div class="v">${s.rollNumber? escapeHtml(s.rollNumber) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).name) : "—"}</div></div>
+        <div class="kv"><div class="k">Batch Timing</div><div class="v">${getBatch(s.batchId)? escapeHtml(getBatch(s.batchId).time||"—") : "—"}</div></div>
       </div>
       <div class="divider"></div>
       <table style="margin-bottom:14px;">
@@ -2101,10 +2202,13 @@ auth.onAuthStateChanged((user)=>{
     render();
     attachStudentsListener();
     attachFeeRatesListener();
+    attachBatchesListener();
   } else {
     if(unsubscribeStudents){ unsubscribeStudents(); unsubscribeStudents = null; }
     if(unsubscribeFeeRates){ unsubscribeFeeRates(); unsubscribeFeeRates = null; }
+    if(unsubscribeBatches){ unsubscribeBatches(); unsubscribeBatches = null; }
     state.students = [];
+    state.batchDraft = null;
     state.loaded = false;
     const appEl = document.getElementById("app");
     if(appEl) appEl.innerHTML = "";
@@ -2114,4 +2218,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.7.0 — added Full Payment Slip for fully-paid students; ID card now shows DOB + photo box instead of guardian number -->
+<!-- VERSION 4.8.0 — added Batch Settings (custom batches with timing), Batch selection on admission, shown on ID Card/Receipt/Full Payment Slip -->
