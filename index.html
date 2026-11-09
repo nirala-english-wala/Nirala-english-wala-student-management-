@@ -294,6 +294,13 @@
     .topbar .btn{padding:9px 12px; font-size:12.5px;}
   }
 
+  /* ---- admission form scanner ---- */
+  @page sheet{ size:A4; margin:0; }
+  #blankSheetHost{display:none;}
+  .scan-banner{background:#FFF8E6; border:1px solid #F5D58A; border-radius:10px; padding:10px 12px; font-size:12.5px; line-height:1.55; margin:0 0 14px 0; color:#6B4A07;}
+  .scan-steps{margin:0 0 6px 18px; padding:0; font-size:13px; line-height:1.75;}
+  @media print{ body.sheet-mode > *:not(#blankSheetHost){display:none !important;} body.sheet-mode #blankSheetHost{display:block !important;} }
+
   @media print{
     .sidebar, .topbar .btn, .no-print, .menu-btn{display:none !important;}
     body{background:#fff;}
@@ -336,7 +343,7 @@ const ARTS_SUBJECTS = [
 
 /* Version number helps you tell which copy of the file is the latest one
    when you have several floating around. */
-const APP_VERSION = "4.13.0";
+const APP_VERSION = "4.14.0";
 
 /* ---------------------------------------------------------------------
    PASTE YOUR OWN FIREBASE PROJECT CONFIG HERE
@@ -801,6 +808,7 @@ function render(){
           </div>
         </div>
         <div class="no-print" style="display:flex; gap:10px;">
+          <button class="btn btn-ghost" id="btnScanForm">📷 Scan Form</button>
           <button class="btn btn-primary" id="btnAddStudent">${ICONS.plus} New Admission</button>
         </div>
       </div>
@@ -816,6 +824,7 @@ function render(){
     });
   });
   document.getElementById("btnAddStudent").addEventListener("click", ()=> openStudentForm(null));
+  document.getElementById("btnScanForm").addEventListener("click", openScanModal);
   const signOutLink = document.getElementById("signOutLink");
   if(signOutLink) signOutLink.addEventListener("click", (e)=>{ e.preventDefault(); auth.signOut(); });
   const menuBtn = document.getElementById("menuBtn");
@@ -1436,7 +1445,7 @@ function closeOverlay(){
 /* =========================================================
    STUDENT FORM (add / edit)
    ========================================================= */
-function openStudentForm(studentId){
+function openStudentForm(studentId, prefill){
   const editing = !!studentId;
   const s = editing ? state.students.find(x=>x.id===studentId) : null;
   const admissionId = editing ? s.id : nextAdmissionId();
@@ -1686,6 +1695,7 @@ function openStudentForm(studentId){
   }
   document.getElementById("mainStreamSelect").addEventListener("change", refreshMainStreamBlocks);
   refreshMainStreamBlocks();
+  if(prefill) applyScanPrefill(prefill);
 
   document.getElementById("studentForm").addEventListener("submit", (e)=>{
     e.preventDefault();
@@ -2353,6 +2363,638 @@ function hideLockScreen(){
   if(el) el.remove();
 }
 
+/* ====================================================================
+   ADMISSION FORM SCANNER — printed A4 form, one box per letter
+   Layout (mm) is the single source of truth: the same numbers are used
+   to print the blank form and to cut the photo back into boxes.
+   ==================================================================== */
+const SCAN_PAGE_W = 210, SCAN_PAGE_H = 297;
+const SCAN_CELL_W = 6, SCAN_CELL_H = 8;
+/* Four corner squares. Top-left is bigger so the app knows which way is up. */
+const SCAN_MARKERS = [
+  { x: 11,  y: 11,  size: 11 }, // top-left
+  { x: 199, y: 11,  size: 7 },  // top-right
+  { x: 199, y: 286, size: 7 },  // bottom-right
+  { x: 11,  y: 286, size: 7 },  // bottom-left
+];
+
+function buildScanLayout(){
+  const fields = [], ticks = [];
+  function add(key, label, kind, x, y, n, opt){
+    opt = opt || {};
+    const groups = opt.groups || [n];
+    const cells = [];
+    let cx = x;
+    groups.forEach((g, gi)=>{
+      for(let i=0;i<g;i++){ cells.push({ x:cx, y:y, w:SCAN_CELL_W, h:SCAN_CELL_H }); cx += SCAN_CELL_W; }
+      if(gi < groups.length-1) cx += 3;
+    });
+    fields.push({ key, label, kind, cells,
+      labelX: opt.labelX!=null ? opt.labelX : 14, labelY: y, labelW: opt.labelW || 36 });
+  }
+  const P = 12.4; let y = 44;
+  add("name",            "Student Name",        "alpha",  52, y, 24); y += P;
+  add("fatherName",      "Father's Name",       "alpha",  52, y, 24); y += P;
+  add("motherName",      "Mother's Name",       "alpha",  52, y, 24); y += P;
+  add("fatherOccupation","Father's Occupation", "alpha",  52, y, 24); y += P;
+  add("mobile",          "Student Mobile",      "digits", 52, y, 10);
+  add("studentWhatsapp", "WhatsApp",            "digits", 130, y, 10, { labelX:114, labelW:15 }); y += P;
+  add("guardianMobile",  "Guardian Mobile",     "digits", 52, y, 10);
+  add("guardianWhatsapp","WhatsApp",            "digits", 130, y, 10, { labelX:114, labelW:15 }); y += P;
+  add("dob",             "Date of Birth (DD MM YYYY)", "digits", 52, y, 8, { groups:[2,2,4] });
+  add("rollNumber",      "Roll No",             "alnum",  136, y, 6, { labelX:116, labelW:18 }); y += P;
+  add("aadhaar",         "Aadhaar Number",      "digits", 52, y, 12); y += P;
+  add("village",         "City / Village",      "alpha",  52, y, 24); y += P;
+  add("ward",            "Ward No",             "alnum",  52, y, 4);
+  add("block",           "Block",               "alpha",  98, y, 12, { labelX:80, labelW:16 }); y += P;
+  add("post",            "Post",                "alpha",  52, y, 24); y += P;
+  add("district",        "District",            "alpha",  52, y, 24); y += P;
+  add("state",           "State",               "alpha",  52, y, 24); y += P;
+  add("nationality",     "Nationality",         "alpha",  52, y, 12); y += P;
+  add("previousSchool",  "Class 10 School / Coaching", "alnum", 52, y, 24); y += P;
+
+  const TS = 6.5; y += 2;
+  const tickRows = [
+    { group:"class",      label:"Class",                 items:[["11","11",52],["12","12",80]] },
+    { group:"streams",    label:"Stream (tick all)",     items:[["English","English",52],["Arts","Arts",92],["Hindi","Hindi",122]] },
+    { group:"mainStream", label:"Main Stream",           items:[["Science","Science",52],["Commerce","Commerce",92],["Arts","Arts",132]] },
+  ];
+  tickRows.forEach(r=>{
+    r.items.forEach(it=> ticks.push({ group:r.group, value:it[0], label:it[1], x:it[2], y:y, size:TS, groupLabel:r.label }));
+    y += 12;
+  });
+  return { fields, ticks, footerY: y + 6 };
+}
+
+/* HTML of the blank sheet (used for printing / PDF). Everything is placed in mm. */
+function renderBlankSheetHTML(){
+  const L = buildScanLayout();
+  const esc = s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  let h = `<div class="scan-sheet" style="position:relative; width:${SCAN_PAGE_W}mm; height:${SCAN_PAGE_H}mm; background:#fff; color:#111; font-family:Arial,Helvetica,sans-serif; overflow:hidden; page:sheet; -webkit-print-color-adjust:exact; print-color-adjust:exact;">`;
+  SCAN_MARKERS.forEach(m=>{
+    h += `<div style="position:absolute; left:${m.x-m.size/2}mm; top:${m.y-m.size/2}mm; width:${m.size}mm; height:${m.size}mm; background:#000; -webkit-print-color-adjust:exact; print-color-adjust:exact;"></div>`;
+  });
+  h += `<div style="position:absolute; left:25mm; width:160mm; top:13mm; text-align:center; font-weight:800; font-size:5.2mm;">${esc(typeof state!=="undefined" && state.settings ? state.settings.instituteName : "Nirala English Wala & Arts Classes")}</div>`;
+  h += `<div style="position:absolute; left:25mm; width:160mm; top:21mm; text-align:center; font-weight:700; font-size:4mm; letter-spacing:0.4mm;">ADMISSION FORM</div>`;
+  h += `<div style="position:absolute; left:20mm; width:170mm; top:28.5mm; text-align:center; font-size:2.7mm; line-height:1.45; color:#333;">Write in <b>CAPITAL LETTERS</b>, one letter in each box. Leave one box empty between words.<br/>Numbers: digits only. Tick (&#10003;) the boxes. Do not write outside the boxes or touch the black corner squares.</div>`;
+  L.fields.forEach(f=>{
+    h += `<div style="position:absolute; left:${f.labelX}mm; top:${f.labelY}mm; width:${f.labelW}mm; height:${SCAN_CELL_H}mm; display:flex; align-items:center; font-size:2.9mm; font-weight:600; line-height:1.1;">${esc(f.label)}</div>`;
+    f.cells.forEach(c=>{
+      h += `<div style="position:absolute; left:${c.x}mm; top:${c.y}mm; width:${c.w}mm; height:${c.h}mm; box-sizing:border-box; border:0.35mm solid #222;"></div>`;
+    });
+  });
+  const seen = {};
+  L.ticks.forEach(t=>{
+    if(!seen[t.group]){
+      seen[t.group] = true;
+      h += `<div style="position:absolute; left:14mm; top:${t.y}mm; width:36mm; height:${t.size}mm; display:flex; align-items:center; font-size:2.9mm; font-weight:600;">${esc(t.groupLabel)}</div>`;
+    }
+    h += `<div style="position:absolute; left:${t.x}mm; top:${t.y}mm; width:${t.size}mm; height:${t.size}mm; box-sizing:border-box; border:0.35mm solid #222;"></div>`;
+    h += `<div style="position:absolute; left:${t.x+t.size+1.6}mm; top:${t.y}mm; height:${t.size}mm; display:flex; align-items:center; font-size:3mm;">${esc(t.label)}</div>`;
+  });
+  h += `<div style="position:absolute; left:20mm; top:${L.footerY}mm; font-size:2.9mm;">Guardian's signature: ____________________</div>`;
+  h += `<div style="position:absolute; left:120mm; top:${L.footerY}mm; font-size:2.9mm;">Date: ______ / ______ / ________</div>`;
+  h += `</div>`;
+  return h;
+}
+
+/* ---------------------------- image helpers ---------------------------- */
+function scanGrayFromCanvas(cv){
+  const w = cv.width, h = cv.height;
+  const d = cv.getContext("2d").getImageData(0,0,w,h).data;
+  const g = new Uint8Array(w*h);
+  for(let i=0,j=0;i<g.length;i++,j+=4) g[i] = (d[j]*77 + d[j+1]*150 + d[j+2]*29) >> 8;
+  return { g, w, h };
+}
+function scanDownscale(G, maxSide){
+  const s = Math.min(1, maxSide/Math.max(G.w, G.h));
+  if(s === 1) return { g:G.g, w:G.w, h:G.h, factor:1 };
+  const nw = Math.round(G.w*s), nh = Math.round(G.h*s);
+  const out = new Uint8Array(nw*nh);
+  for(let y=0;y<nh;y++){
+    const y0 = Math.floor(y/s), y1 = Math.max(y0+1, Math.min(G.h, Math.floor((y+1)/s)));
+    for(let x=0;x<nw;x++){
+      const x0 = Math.floor(x/s), x1 = Math.max(x0+1, Math.min(G.w, Math.floor((x+1)/s)));
+      let sum = 0, n = 0;
+      for(let yy=y0;yy<y1;yy++){ const row = yy*G.w; for(let xx=x0;xx<x1;xx++){ sum += G.g[row+xx]; n++; } }
+      out[y*nw+x] = sum/n;
+    }
+  }
+  return { g:out, w:nw, h:nh, factor:G.w/nw };
+}
+function scanAdaptive(g, w, h, win, ratio){
+  const W1 = w+1;
+  const I = new Uint32Array(W1*(h+1));
+  for(let y=1;y<=h;y++){
+    let rowSum = 0;
+    for(let x=1;x<=w;x++){
+      rowSum += g[(y-1)*w + (x-1)];
+      I[y*W1+x] = I[(y-1)*W1+x] + rowSum;
+    }
+  }
+  const half = win>>1;
+  const bin = new Uint8Array(w*h);
+  for(let y=0;y<h;y++){
+    const y0 = Math.max(0,y-half), y1 = Math.min(h,y+half+1);
+    for(let x=0;x<w;x++){
+      const x0 = Math.max(0,x-half), x1 = Math.min(w,x+half+1);
+      const area = (x1-x0)*(y1-y0);
+      const sum = I[y1*W1+x1] - I[y0*W1+x1] - I[y1*W1+x0] + I[y0*W1+x0];
+      bin[y*w+x] = (g[y*w+x]*area < sum*ratio) ? 1 : 0;
+    }
+  }
+  return bin;
+}
+function scanComponents(bin, w, h){
+  const seen = new Uint8Array(w*h);
+  const stack = new Int32Array(w*h);
+  const comps = [];
+  for(let i=0;i<w*h;i++){
+    if(!bin[i] || seen[i]) continue;
+    let sp = 0; stack[sp++] = i; seen[i] = 1;
+    let area=0, sx=0, sy=0, sxx=0, syy=0, sxy=0, minx=w, maxx=0, miny=h, maxy=0;
+    while(sp){
+      const p = stack[--sp]; const y = (p/w)|0, x = p - y*w;
+      area++; sx += x; sy += y; sxx += x*x; syy += y*y; sxy += x*y;
+      if(x<minx) minx=x; if(x>maxx) maxx=x; if(y<miny) miny=y; if(y>maxy) maxy=y;
+      if(x>0   && bin[p-1] && !seen[p-1]){ seen[p-1]=1; stack[sp++]=p-1; }
+      if(x<w-1 && bin[p+1] && !seen[p+1]){ seen[p+1]=1; stack[sp++]=p+1; }
+      if(y>0   && bin[p-w] && !seen[p-w]){ seen[p-w]=1; stack[sp++]=p-w; }
+      if(y<h-1 && bin[p+w] && !seen[p+w]){ seen[p+w]=1; stack[sp++]=p+w; }
+    }
+    const mx = sx/area, my = sy/area;
+    const vxx = sxx/area - mx*mx + 1/12, vyy = syy/area - my*my + 1/12, vxy = sxy/area - mx*my;
+    const tr = vxx+vyy, det = vxx*vyy - vxy*vxy, disc = Math.sqrt(Math.max(0, tr*tr/4 - det));
+    const l1 = tr/2 + disc, l2 = Math.max(0.0001, tr/2 - disc);
+    comps.push({ area, cx:mx, cy:my, minx, maxx, miny, maxy,
+      compact: area/(6*tr),          // ~1 for a solid square (any rotation), lower for letters/lines
+      round: Math.sqrt(l2/l1) });    // 1 = not stretched
+  }
+  return comps;
+}
+function scanPolyArea(pts){
+  const cx = pts.reduce((a,p)=>a+p.cx,0)/pts.length, cy = pts.reduce((a,p)=>a+p.cy,0)/pts.length;
+  const s = pts.slice().sort((a,b)=>Math.atan2(a.cy-cy,a.cx-cx)-Math.atan2(b.cy-cy,b.cx-cx));
+  let A = 0;
+  for(let i=0;i<s.length;i++){ const a=s[i], b=s[(i+1)%s.length]; A += a.cx*b.cy - b.cx*a.cy; }
+  return Math.abs(A)/2;
+}
+/* Finds sets of four dark squares that could be the corner markers.
+   Returns up to 12 candidate quads (each a list of 4 points, in clockwise
+   order starting from the bigger square), best-looking first. */
+function scanFindMarkerQuads(D){
+  const win = (Math.round(Math.max(D.w, D.h)/10)|1);
+  const bin = scanAdaptive(D.g, D.w, D.h, win, 0.78);
+  const comps = scanComponents(bin, D.w, D.h);
+  const minA = Math.max(40, D.w*D.h*0.00004), maxA = D.w*D.h*0.02;
+  let cands = comps.filter(c=> c.area>=minA && c.area<=maxA && c.compact>=0.8 && c.compact<=1.25 && c.round>=0.5);
+  if(cands.length < 4) return [];
+  cands.sort((a,b)=>b.area-a.area);
+  cands = cands.slice(0, 16);
+  const quads = [];
+  for(let a=0;a<cands.length;a++) for(let b=a+1;b<cands.length;b++) for(let c=b+1;c<cands.length;c++) for(let d=c+1;d<cands.length;d++){
+    const q = [cands[a],cands[b],cands[c],cands[d]];
+    const ar = q.map(p=>p.area).sort((x,y)=>x-y);
+    if(ar[2] > ar[0]*2.6 || ar[3] > ar[0]*6) continue;   // corner squares must look alike (big one at most ~6x the small)
+    const A = scanPolyArea(q);
+    if(A < D.w*D.h*0.10) continue;                // the form should fill a decent part of the photo
+    quads.push({ q, A });
+  }
+  quads.sort((x,y)=>y.A-x.A);
+  return quads.slice(0, 20).map(({q})=>{
+    const cx = q.reduce((s,p)=>s+p.cx,0)/4, cy = q.reduce((s,p)=>s+p.cy,0)/4;
+    const pts = q.slice().sort((a,b)=>Math.atan2(a.cy-cy,a.cx-cx)-Math.atan2(b.cy-cy,b.cx-cx)); // clockwise on screen
+    let big = 0; for(let i=1;i<4;i++) if(pts[i].area > pts[big].area) big = i;
+    return [0,1,2,3].map(k=>{ const p = pts[(big+k)%4]; return { x:p.cx, y:p.cy, area:p.area }; });
+  });
+}
+function scanSolve(A, b){
+  const n = b.length;
+  for(let i=0;i<n;i++){
+    let piv = i;
+    for(let r=i+1;r<n;r++) if(Math.abs(A[r][i]) > Math.abs(A[piv][i])) piv = r;
+    [A[i],A[piv]] = [A[piv],A[i]]; [b[i],b[piv]] = [b[piv],b[i]];
+    for(let r=i+1;r<n;r++){
+      const f = A[r][i]/A[i][i];
+      for(let c=i;c<n;c++) A[r][c] -= f*A[i][c];
+      b[r] -= f*b[i];
+    }
+  }
+  const x = new Array(n).fill(0);
+  for(let i=n-1;i>=0;i--){
+    let s = b[i];
+    for(let c=i+1;c<n;c++) s -= A[i][c]*x[c];
+    x[i] = s/A[i][i];
+  }
+  return x;
+}
+/* mm on the form  ->  pixel in the photo */
+function scanHomography(markersImg, scale){
+  const A = [], b = [];
+  for(let i=0;i<4;i++){
+    const u = SCAN_MARKERS[i].x, v = SCAN_MARKERS[i].y;
+    const x = markersImg[i].x*scale, y = markersImg[i].y*scale;
+    A.push([u,v,1,0,0,0,-u*x,-v*x]); b.push(x);
+    A.push([0,0,0,u,v,1,-u*y,-v*y]); b.push(y);
+  }
+  return scanSolve(A, b);
+}
+function scanBilinear(G, x, y){
+  if(x < 0 || y < 0 || x > G.w-1 || y > G.h-1) return 255;
+  const x0 = x|0, y0 = y|0, fx = x-x0, fy = y-y0;
+  const x1 = Math.min(G.w-1,x0+1), y1 = Math.min(G.h-1,y0+1);
+  const a = G.g[y0*G.w+x0], b = G.g[y0*G.w+x1], c = G.g[y1*G.w+x0], d = G.g[y1*G.w+x1];
+  return (a*(1-fx)+b*fx)*(1-fy) + (c*(1-fx)+d*fx)*fy;
+}
+/* Cut a rectangle (mm on the form) out of the photo, straightened. */
+function scanSampleRect(G, H, x0, y0, w, h, ppm){
+  const W = Math.max(1, Math.round(w*ppm)), Ht = Math.max(1, Math.round(h*ppm));
+  const out = new Uint8Array(W*Ht);
+  for(let r=0;r<Ht;r++) for(let c=0;c<W;c++){
+    let acc = 0;
+    for(let sy=0;sy<2;sy++) for(let sx=0;sx<2;sx++){
+      const u = x0 + (c+0.25+0.5*sx)/ppm, v = y0 + (r+0.25+0.5*sy)/ppm;
+      const den = H[6]*u + H[7]*v + 1;
+      acc += scanBilinear(G, (H[0]*u+H[1]*v+H[2])/den, (H[3]*u+H[4]*v+H[5])/den);
+    }
+    out[r*W+c] = acc/4;
+  }
+  return { data:out, w:W, h:Ht };
+}
+function scanPercentile(arr, p){
+  const hist = new Uint32Array(256);
+  for(let i=0;i<arr.length;i++) hist[arr[i]|0]++;
+  const target = arr.length*p; let acc = 0;
+  for(let v=0;v<256;v++){ acc += hist[v]; if(acc >= target) return v; }
+  return 255;
+}
+function scanOtsu(arr){
+  const hist = new Uint32Array(256);
+  for(let i=0;i<arr.length;i++) hist[arr[i]|0]++;
+  const total = arr.length;
+  let sum = 0; for(let t=0;t<256;t++) sum += t*hist[t];
+  let sumB = 0, wB = 0, best = 0, thr = 128;
+  for(let t=0;t<256;t++){
+    wB += hist[t]; if(!wB) continue;
+    const wF = total-wB; if(!wF) break;
+    sumB += t*hist[t];
+    const mB = sumB/wB, mF = (sum-sumB)/wF;
+    const between = wB*wF*(mB-mF)*(mB-mF);
+    if(between > best){ best = between; thr = t; }
+  }
+  return thr;
+}
+/* Remove thin printed-line leftovers and specks from a binary crop (1 = ink). */
+function scanCleanBinary(bin, w, h){
+  const comps = [];
+  const seen = new Uint8Array(w*h);
+  const stack = new Int32Array(w*h);
+  const labels = new Int32Array(w*h);
+  for(let i=0;i<w*h;i++){
+    if(!bin[i] || seen[i]) continue;
+    let sp=0; stack[sp++]=i; seen[i]=1;
+    const id = comps.length+1; const members = [];
+    let minx=w,maxx=0,miny=h,maxy=0;
+    while(sp){
+      const p = stack[--sp]; const y=(p/w)|0, x=p-y*w;
+      members.push(p); labels[p]=id;
+      if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y;
+      if(x>0   && bin[p-1] && !seen[p-1]){ seen[p-1]=1; stack[sp++]=p-1; }
+      if(x<w-1 && bin[p+1] && !seen[p+1]){ seen[p+1]=1; stack[sp++]=p+1; }
+      if(y>0   && bin[p-w] && !seen[p-w]){ seen[p-w]=1; stack[sp++]=p-w; }
+      if(y<h-1 && bin[p+w] && !seen[p+w]){ seen[p+w]=1; stack[sp++]=p+w; }
+    }
+    comps.push({ members, minx, maxx, miny, maxy });
+  }
+  const out = new Uint8Array(w*h);
+  let ink = 0;
+  comps.forEach(c=>{
+    const bw = c.maxx-c.minx+1, bh = c.maxy-c.miny+1;
+    const longH = bw >= 0.8*w && bh <= 0.22*h;
+    const longV = bh >= 0.8*h && bw <= 0.22*w;
+    const speck = c.members.length < 10;
+    if(longH || longV || speck) return;
+    c.members.forEach(p=>{ out[p]=1; ink++; });
+  });
+  return { bin:out, ink };
+}
+/* One letter box -> { blank, ink, canvas } (canvas = clean black-on-white glyph for OCR). */
+function scanProcessCell(G, H, cell, makeCanvas){
+  const inset = 0.9, ppm = 12;
+  const R = scanSampleRect(G, H, cell.x+inset, cell.y+inset, cell.w-2*inset, cell.h-2*inset, ppm);
+  const paper = scanPercentile(R.data, 0.8);
+  const thr = Math.min(scanOtsu(R.data), paper*0.8);
+  const raw = new Uint8Array(R.w*R.h);
+  for(let i=0;i<raw.length;i++) raw[i] = (R.data[i] < thr && paper-R.data[i] > 28) ? 1 : 0;
+  const cl = scanCleanBinary(raw, R.w, R.h);
+  const area = R.w*R.h;
+  const res = { blank: cl.ink < 45 || cl.ink < area*0.012, ink: cl.ink/area };
+  if(res.blank || !makeCanvas) return res;
+  let minx=R.w,maxx=0,miny=R.h,maxy=0;
+  for(let y=0;y<R.h;y++) for(let x=0;x<R.w;x++) if(cl.bin[y*R.w+x]){ if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y; }
+  const bw = maxx-minx+1, bh = maxy-miny+1;
+  const target = 56, s = target/Math.max(bw,bh);
+  const OW = 96, OH = 96;
+  const cv = document.createElement("canvas"); cv.width = OW; cv.height = OH;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0,0,OW,OH);
+  const tmp = document.createElement("canvas"); tmp.width = bw; tmp.height = bh;
+  const tctx = tmp.getContext("2d"); const id = tctx.createImageData(bw,bh);
+  for(let y=0;y<bh;y++) for(let x=0;x<bw;x++){
+    const v = cl.bin[(miny+y)*R.w + (minx+x)] ? 0 : 255, o = (y*bw+x)*4;
+    id.data[o]=id.data[o+1]=id.data[o+2]=v; id.data[o+3]=255;
+  }
+  tctx.putImageData(id,0,0);
+  ctx.imageSmoothingEnabled = true;
+  const dw = Math.round(bw*s), dh = Math.round(bh*s);
+  ctx.drawImage(tmp, (OW-dw)/2, (OH-dh)/2, dw, dh);
+  res.canvas = cv;
+  res.glyph = tmp;          // tight black-on-white picture of just the letter
+  return res;
+}
+/* Tick boxes: compare ink inside the box with the paper just outside it. */
+function scanTickInk(G, H, t){
+  const ppm = 12, ins = 1.3;
+  const inner = scanSampleRect(G, H, t.x+ins, t.y+ins, t.size-2*ins, t.size-2*ins, ppm);
+  const ring = scanSampleRect(G, H, t.x-3, t.y-3, t.size+6, t.size+6, 6);
+  const paper = scanPercentile(ring.data, 0.6);
+  let dark = 0;
+  for(let i=0;i<inner.data.length;i++) if(inner.data[i] < paper*0.68) dark++;
+  return dark/inner.data.length;
+}
+/* Sanity check: do the printed box lines sit where the layout says they should? 0..1 */
+function scanAlignmentScore(G, H, layout){
+  let good = 0, total = 0;
+  layout.fields.slice(0,6).forEach(f=>f.cells.forEach(c=>{
+    const edge = scanSampleRect(G, H, c.x-0.2, c.y+1.5, 0.4, c.h-3, 12);   // left border line
+    const ins  = scanSampleRect(G, H, c.x+1.2, c.y+1.5, 0.4, c.h-3, 12);   // just inside the box
+    let a=0,b=0; for(let i=0;i<edge.data.length;i++) a+=edge.data[i]; for(let i=0;i<ins.data.length;i++) b+=ins.data[i];
+    a/=edge.data.length; b/=ins.data.length; total++;
+    if(b > 40 && a < b*0.8) good++;
+  }));
+  return total ? good/total : 0;
+}
+/* Straightened whole page, small, for the review picture. */
+function scanPreviewCanvas(G, H){
+  const ppm = 3, W = Math.round(SCAN_PAGE_W*ppm), Ht = Math.round(SCAN_PAGE_H*ppm);
+  const R = scanSampleRect(G, H, 0, 0, SCAN_PAGE_W, SCAN_PAGE_H, ppm);
+  const cv = document.createElement("canvas"); cv.width = R.w; cv.height = R.h;
+  const ctx = cv.getContext("2d"); const id = ctx.createImageData(R.w, R.h);
+  for(let i=0;i<R.data.length;i++){ id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=R.data[i]; id.data[i*4+3]=255; }
+  ctx.putImageData(id,0,0);
+  return cv;
+}
+/* Photo canvas -> everything the OCR step needs (or an error message). */
+function scanPrepare(photoCanvas){
+  const G = scanGrayFromCanvas(photoCanvas);
+  const D = scanDownscale(G, 1000);
+  const quads = scanFindMarkerQuads(D);
+  const layout = buildScanLayout();
+  let best = null;
+  for(const quad of quads){
+    for(let rot=0; rot<4; rot++){
+      const markers = [0,1,2,3].map(k=>quad[(k+rot)%4]);
+      const H = scanHomography(markers, D.factor);
+      const align = scanAlignmentScore(G, H, layout);
+      if(!best || align > best.align) best = { G, H, markers, layout, align };
+      if(best.align >= 0.8) break;
+    }
+    if(best && best.align >= 0.8) break;
+  }
+  if(!best || best.align < 0.35)
+    return { error:"Form ke chaaron kone ke kaale square nahi mile ya photo tedhi/dhundhli hai. Poora form frame me rakho, upar se seedha photo lo, roshni acchi rakho, aur neeche plain table rakho." };
+  return best;
+}
+
+async function scanFileToCanvas(file){
+  const url = URL.createObjectURL(file);
+  const img = await new Promise((res, rej)=>{ const i = new Image(); i.onload = ()=>res(i); i.onerror = ()=>rej(new Error("Photo khul nahi saki")); i.src = url; });
+  const maxD = 3200, s = Math.min(1, maxD/Math.max(img.naturalWidth, img.naturalHeight));
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(img.naturalWidth*s); cv.height = Math.round(img.naturalHeight*s);
+  cv.getContext("2d", { willReadFrequently:true }).drawImage(img, 0, 0, cv.width, cv.height);
+  URL.revokeObjectURL(url);
+  return cv;
+}
+/* Cut every box out of the photo. (OCR happens afterwards.) */
+function scanExtractAll(prep){
+  const cells = {}, ticks = {};
+  prep.layout.fields.forEach(f=>{
+    cells[f.key] = { kind:f.kind, items:f.cells.map(c=>scanProcessCell(prep.G, prep.H, c, true)) };
+  });
+  prep.layout.ticks.forEach(t=>{
+    (ticks[t.group] = ticks[t.group] || []).push({ value:t.value, ink:scanTickInk(prep.G, prep.H, t) });
+  });
+  return { cells, ticks };
+}
+/* Turn tick-box ink into choices. */
+function scanReadTicks(ticks){
+  const TH = 0.045, res = {};
+  const cls = (ticks.class||[]).slice().sort((a,b)=>b.ink-a.ink)[0];
+  res.class = cls && cls.ink >= TH ? cls.value : "";
+  res.streams = (ticks.streams||[]).filter(t=>t.ink >= TH).map(t=>t.value);
+  const ms = (ticks.mainStream||[]).slice().sort((a,b)=>b.ink-a.ink)[0];
+  res.mainStream = ms && ms.ink >= TH ? ms.value : "";
+  return res;
+}
+
+
+/* ====================================================================
+   SCAN FLOW — OCR (Tesseract.js, loaded only when needed) + screens
+   ==================================================================== */
+const TESSERACT_URL = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js";
+const TESSERACT_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/worker.min.js";
+const SCAN_WHITELIST = {
+  digits: "0123456789",
+  alpha:  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  alnum:  "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+};
+function scanLoadTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  return new Promise((res, rej)=>{
+    const s = document.createElement("script");
+    s.src = TESSERACT_URL; s.onload = res;
+    s.onerror = ()=>rej(new Error("OCR engine load nahi hua. Internet check karo aur dobara try karo."));
+    document.head.appendChild(s);
+  });
+}
+/* Letters side by side on a white strip: this is what the OCR reads. */
+function scanRowCanvas(glyphs, h, padX, outer){
+  const widths = glyphs.map(g=>Math.max(1, Math.round(g.width*h/g.height)));
+  const W = widths.reduce((a,b)=>a+b+2*padX, 0) + 2*outer;
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = h + 2*outer;
+  const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0,0,W,cv.height);
+  ctx.imageSmoothingEnabled = true;
+  let x = outer;
+  glyphs.forEach((g,i)=>{ x += padX; ctx.drawImage(g, x, outer, widths[i], h); x += widths[i] + padX; });
+  return cv;
+}
+function scanMajority(t){
+  if(!t) return "?";
+  const c = {}; for(const ch of t) c[ch] = (c[ch]||0)+1;
+  return Object.keys(c).sort((a,b)=>c[b]-c[a])[0];
+}
+/* Reads every field. Words are read as a group (better context); if the count of letters
+   doesn't match the boxes, or it is a single letter, each letter is read on its own. */
+async function scanOcrAll(extraction, layout, onProgress){
+  await scanLoadTesseract();
+  const worker = await Tesseract.createWorker("eng", 1, { workerPath: TESSERACT_WORKER_URL });
+  const values = {}, flags = {};
+  let done = 0;
+  try{
+    for(const kind of ["digits","alpha","alnum"]){
+      await worker.setParameters({ tessedit_char_whitelist: SCAN_WHITELIST[kind], tessedit_pageseg_mode: "7" });
+      for(const f of layout.fields.filter(x=>x.kind===kind)){
+        const items = extraction.cells[f.key].items;
+        const words = []; let cur = [];
+        items.forEach((it,i)=>{ if(it.blank){ if(cur.length) words.push(cur); cur = []; } else cur.push(i); });
+        if(cur.length) words.push(cur);
+        const out = []; let flag = "";
+        for(const w of words){
+          const glyphs = w.map(i=>items[i].glyph);
+          let txt = "";
+          if(w.length > 1){
+            const r = await worker.recognize(scanRowCanvas(glyphs, 48, 10, 24));
+            txt = (r.data.text||"").replace(/\s+/g,"");
+            if(r.data.confidence < 40) flag = "check";
+          }
+          if(w.length === 1 || txt.length !== w.length){
+            if(w.length > 1) flag = "check";
+            txt = "";
+            for(const g of glyphs){
+              const r = await worker.recognize(scanRowCanvas([g,g,g], 48, 14, 24));
+              txt += scanMajority((r.data.text||"").replace(/\s+/g,""));
+            }
+          }
+          if(txt.indexOf("?") >= 0) flag = "check";
+          out.push(txt);
+        }
+        values[f.key] = out.join(" ");
+        if(flag) flags[f.key] = flag;
+        done++; if(onProgress) onProgress(done, layout.fields.length);
+      }
+    }
+  } finally { try{ await worker.terminate(); }catch(e){} }
+  return { values, flags };
+}
+/* Raw OCR text + ticks  ->  what goes into the admission form. */
+function scanBuildResult(ocr, ticks, previewURL, align){
+  const v = ocr.values, flags = Object.assign({}, ocr.flags), f = {};
+  const title = s=>String(s||"").toLowerCase().replace(/\b[a-z]/g, c=>c.toUpperCase());
+  ["name","fatherName","motherName","fatherOccupation","village","block","post","district","state","nationality","previousSchool"]
+    .forEach(k=>{ f[k] = title(v[k]); });
+  f.rollNumber = String(v.rollNumber||"").replace(/\s+/g,"");
+  f.ward = String(v.ward||"").replace(/\s+/g,"");
+  [["mobile",true],["studentWhatsapp",false],["guardianMobile",true],["guardianWhatsapp",true]].forEach(([k,req])=>{
+    const d = String(v[k]||"").replace(/\D/g,""); f[k] = d;
+    if((req || d) && d.length !== 10) flags[k] = "check";
+  });
+  const aad = String(v.aadhaar||"").replace(/\D/g,""); f.aadhaarNumber = aad;
+  if(aad && aad.length !== 12) flags.aadhaar = "check";
+  const d = String(v.dob||"").replace(/\D/g,"");
+  if(d.length === 8){
+    const dd = +d.slice(0,2), mm = +d.slice(2,4), yy = +d.slice(4,8);
+    const ok = dd>=1 && dd<=31 && mm>=1 && mm<=12 && yy>=1985 && yy<=new Date().getFullYear();
+    if(ok) f.dateOfBirth = `${yy}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`; else flags.dob = "check";
+  } else if(d.length){ flags.dob = "check"; }
+  if(!f.name.trim()) flags.name = "check";
+  if(!f.fatherName.trim()) flags.fatherName = "check";
+  return { fields:f, class:ticks.class, streams:ticks.streams, mainStream:ticks.mainStream,
+           flags, preview:previewURL, tilted:(align < 0.6) };
+}
+/* Fill the open "New Admission" form with scan results and mark doubtful boxes. */
+function applyScanPrefill(p){
+  const form = document.getElementById("studentForm");
+  if(!form) return;
+  const mark = el=>{ if(el){ el.style.borderColor = "#F59E0B"; el.style.background = "#FFF8E6"; } };
+  Object.keys(p.fields).forEach(k=>{
+    const el = form.elements[k];
+    if(el && p.fields[k] !== undefined && p.fields[k] !== "") el.value = p.fields[k];
+  });
+  if(p.class) form.elements["class"].value = p.class; else mark(form.elements["class"]);
+  form.querySelectorAll(".streamCheckbox").forEach(cb=>{ cb.checked = p.streams.indexOf(cb.value) >= 0; });
+  if(!p.streams.length) mark(form.querySelector(".streamCheckbox") && form.querySelector(".streamCheckbox").parentElement);
+  if(p.mainStream) form.elements["mainStream"].value = p.mainStream;
+  ["classSelect","mainStreamSelect"].forEach(id=>{ const el = document.getElementById(id); if(el) el.dispatchEvent(new Event("change")); });
+  const nameMap = { dob:"dateOfBirth", aadhaar:"aadhaarNumber" };
+  Object.keys(p.flags).forEach(k=> mark(form.elements[nameMap[k] || k]));
+  const head = document.querySelector("#overlayRoot .modal-head");
+  if(head){
+    const b = document.createElement("div");
+    b.className = "scan-banner";
+    b.innerHTML = `<b>Form scan se bhara gaya hai.</b> Save karne se pehle <b>har field photo se milao</b> — orange wale fields khaas dhyan se dekho. Admission date aaj ki hai, fee class/stream se bhari hai.
+      ${p.tilted ? `<br/><b>Dhyan:</b> photo thodi tedhi thi, isliye galtiyan zyada ho sakti hain.` : ""}
+      <details style="margin-top:6px;"><summary style="cursor:pointer; font-weight:600;">Scan ki hui photo dekho</summary><img src="${p.preview}" alt="scan" style="width:100%; margin-top:8px; border-radius:8px; border:1px solid #E5D8B0;"/></details>`;
+    head.insertAdjacentElement("afterend", b);
+  }
+}
+/* ---------------- screens ---------------- */
+function printBlankForm(){
+  const old = document.getElementById("blankSheetHost"); if(old) old.remove();
+  const host = document.createElement("div");
+  host.id = "blankSheetHost"; host.innerHTML = renderBlankSheetHTML();
+  document.body.appendChild(host);
+  document.body.classList.add("sheet-mode");
+  externalUntil = Date.now() + 4000;
+  window.print();
+}
+window.addEventListener("afterprint", ()=>{
+  document.body.classList.remove("sheet-mode");
+  const h = document.getElementById("blankSheetHost"); if(h) h.remove();
+});
+function openScanModal(){
+  openOverlay(`
+  <div class="modal">
+    <div class="modal-head"><h2>Admission Form Scan Karo</h2><button class="modal-close" id="closeModal">&times;</button></div>
+    <ol class="scan-steps">
+      <li>Pehle <b>"Blank form print karo"</b> se chhapa hua form lo (A4). Student isse <b>CAPITAL letters</b> me, har box me ek letter, bhare.</li>
+      <li>Bhare hue form ko <b>plain table pe</b>, achhi roshni me rakho. <b>Charon kone ke kaale square</b> photo me dikhne chahiye.</li>
+      <li>Phone <b>seedha upar se</b> pakad ke photo lo (tedha mat), phir niche button se bhejo.</li>
+    </ol>
+    <input type="file" id="scanFileCam" accept="image/*" capture="environment" style="display:none"/>
+    <input type="file" id="scanFileGal" accept="image/*" style="display:none"/>
+    <div id="scanStatus" class="hint" style="min-height:40px; margin:10px 0; line-height:1.5;"></div>
+    <div class="form-actions" style="flex-wrap:wrap; justify-content:space-between;">
+      <button type="button" class="btn btn-ghost" id="btnPrintBlankForm">Blank form print karo</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn btn-ghost" id="btnScanGallery">Gallery se chuno</button>
+        <button type="button" class="btn btn-primary" id="btnScanCamera">Camera se photo lo</button>
+      </div>
+    </div>
+  </div>`);
+  document.getElementById("closeModal").addEventListener("click", closeOverlay);
+  document.getElementById("btnPrintBlankForm").addEventListener("click", printBlankForm);
+  const cam = document.getElementById("scanFileCam"), gal = document.getElementById("scanFileGal");
+  document.getElementById("btnScanCamera").addEventListener("click", ()=>{ externalUntil = Date.now()+4000; cam.click(); });
+  document.getElementById("btnScanGallery").addEventListener("click", ()=>{ externalUntil = Date.now()+4000; gal.click(); });
+  [cam, gal].forEach(inp=> inp.addEventListener("change", ()=>{ if(inp.files && inp.files[0]) runScan(inp.files[0]); }));
+}
+async function runScan(file){
+  const status = txt=>{ const el = document.getElementById("scanStatus"); if(el) el.textContent = txt; };
+  const lock = on=>["btnScanCamera","btnScanGallery","btnPrintBlankForm"].forEach(id=>{ const b = document.getElementById(id); if(b) b.disabled = on; });
+  const pause = ()=>new Promise(r=>setTimeout(r, 30));
+  lock(true);
+  try{
+    status("Photo khol raha hu…"); await pause();
+    const cv = await scanFileToCanvas(file);
+    status("Form dhoondh raha hu…"); await pause();
+    const prep = scanPrepare(cv);
+    if(prep.error){ status(prep.error); lock(false); return; }
+    status("Boxes kaat raha hu…"); await pause();
+    const ex = scanExtractAll(prep);
+    const ticks = scanReadTicks(ex.ticks);
+    status("Letters padh raha hu… (pehli baar OCR engine download hota hai, internet chahiye)"); await pause();
+    const ocr = await scanOcrAll(ex, prep.layout, (d,n)=>status(`Letters padh raha hu… ${d}/${n} fields`));
+    const preview = scanPreviewCanvas(prep.G, prep.H).toDataURL("image/jpeg", 0.8);
+    const prefill = scanBuildResult(ocr, ticks, preview, prep.align);
+    closeOverlay();
+    openStudentForm(null, prefill);
+  }catch(err){
+    status("Scan nahi ho paya: " + (err && err.message ? err.message : err));
+    lock(false);
+  }
+}
+
 /* =========================================================
    INIT — Firebase Authentication gate, then live Firestore sync
    ========================================================= */
@@ -2381,4 +3023,4 @@ auth.onAuthStateChanged((user)=>{
 </script>
 </body>
 </html>
-<!-- VERSION 4.13.0 — institute name "Nirala English Wala & Arts Classes"; colourful UI refresh -->
+<!-- VERSION 4.14.0 — Scan Form: camera/photo of a printed one-letter-per-box admission form fills the admission form -->
